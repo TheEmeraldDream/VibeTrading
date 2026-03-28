@@ -17,10 +17,66 @@ const MAX_POINTS = 60;
 
 // ─── Init ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  initResizeHandles();
   initChart();
   connectWS();
   checkClaudeStatus();
 });
+
+// ─── Panel resize ────────────────────────────────────────────
+function initResizeHandles() {
+  const grid = document.querySelector('main.grid');
+
+  // Restore saved widths
+  const saved = JSON.parse(localStorage.getItem('panelWidths') || '{}');
+  if (saved.left)  grid.style.setProperty('--w-left',  saved.left);
+  if (saved.right) grid.style.setProperty('--w-right', saved.right);
+
+  document.querySelectorAll('.resize-handle').forEach(handle => {
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const col    = handle.dataset.col;           // 'left' | 'right'
+      const startX = e.clientX;
+      const prop   = col === 'left' ? '--w-left' : '--w-right';
+      const min    = col === 'left' ? 160 : 220;
+      const max    = col === 'left' ? 520 : 600;
+
+      // Read current pixel width from the grid's computed columns
+      const cols   = getComputedStyle(grid).gridTemplateColumns.split(' ');
+      // Columns: [w-left] [5px] [1fr-px] [5px] [w-right]
+      const startW = col === 'left' ? parseFloat(cols[0]) : parseFloat(cols[4]);
+
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      const onMove = e => {
+        const delta  = e.clientX - startX;
+        const newW   = Math.min(max, Math.max(min,
+          col === 'left' ? startW + delta : startW - delta
+        ));
+        grid.style.setProperty(prop, newW + 'px');
+      };
+
+      const onUp = () => {
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        // Persist
+        const cols = getComputedStyle(grid).gridTemplateColumns.split(' ');
+        localStorage.setItem('panelWidths', JSON.stringify({
+          left:  cols[0],
+          right: cols[4],
+        }));
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup',   onUp);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup',   onUp);
+    });
+  });
+}
 
 // ─── Equity chart ────────────────────────────────────────────
 function initChart() {

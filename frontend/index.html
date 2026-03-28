@@ -31,7 +31,7 @@
   <main class="grid">
 
     <!-- ── LEFT: Account + Metrics ── -->
-    <section class="panel" id="panelLeft">
+    <section class="panel" id="panelLeft" style="min-width:160px">
 
       <div class="panel-title">ACCOUNT</div>
       <div class="metric-grid">
@@ -80,8 +80,10 @@
 
     </section>
 
+    <div class="resize-handle" data-col="left"></div>
+
     <!-- ── CENTER: Positions + Orders ── -->
-    <section class="panel" id="panelCenter">
+    <section class="panel" id="panelCenter" style="min-width:200px">
 
       <div class="panel-title">EQUITY CURVE</div>
       <div class="chart-wrap">
@@ -115,8 +117,10 @@
 
     </section>
 
+    <div class="resize-handle" data-col="right"></div>
+
     <!-- ── RIGHT: Claude Chat ── -->
-    <section class="panel panel-chat" id="panelRight">
+    <section class="panel panel-chat" id="panelRight" style="min-width:220px">
 
       <div class="panel-title">
         CLAUDE STRATEGY ASSISTANT

@@ -111,11 +111,44 @@ header {
 /* ─── Main grid ─────────────────────────────────────────────── */
 main.grid {
   display: grid;
-  grid-template-columns: 220px 1fr 340px;
-  gap: 1px;
+  grid-template-columns: var(--w-left, 220px) 5px 1fr 5px var(--w-right, 340px);
+  gap: 0;
   flex: 1;
   overflow: hidden;
   background: var(--border);
+}
+
+/* ─── Resize handles ────────────────────────────────────────── */
+.resize-handle {
+  background: var(--border);
+  cursor: col-resize;
+  position: relative;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 1px;
+  height: 32px;
+  background: var(--border2);
+  border-radius: 1px;
+  transition: background 0.15s, height 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: #1a1a2e;
+}
+
+.resize-handle:hover::after,
+.resize-handle.dragging::after {
+  background: var(--blue);
+  height: 48px;
 }
 
 /* ─── Panel ─────────────────────────────────────────────────── */
