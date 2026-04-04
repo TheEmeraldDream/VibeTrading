@@ -8,15 +8,20 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv, dotenv_values
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from dotenv import dotenv_values, load_dotenv
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, field_validator
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -40,6 +45,11 @@ ai_client = AIClient()
 
 news_cache: dict[str, Any] = {"articles": [], "last_updated": None}
 
+# ------------------------------------------------------------------ #
+# Rate limiter                                                         #
+# ------------------------------------------------------------------ #
+
+limiter = Limiter(key_func=get_remote_address)
 
 # ------------------------------------------------------------------ #
 # WebSocket manager                                                    #
@@ -76,7 +86,7 @@ ws_manager = ConnectionManager()
 # ------------------------------------------------------------------ #
 
 async def _news_refresh() -> None:
-    """Fetch live prices + news for current holdings every 5 minutes and broadcast."""
+    """Fetch live prices + news every 5 minutes and broadcast to all clients."""
     while True:
         loop = asyncio.get_running_loop()
         try:
@@ -87,7 +97,7 @@ async def _news_refresh() -> None:
             news_cache["articles"] = await loop.run_in_executor(
                 None, news_aggregator.get_news, symbols
             )
-            news_cache["last_updated"] = datetime.utcnow().isoformat()
+            news_cache["last_updated"] = datetime.now(timezone.utc).isoformat()
             logger.info(f"News refreshed — {len(news_cache['articles'])} articles for {symbols}")
         except Exception as e:
             logger.error(f"News refresh error: {e}")
@@ -123,18 +133,67 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="News Aggregator", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Disable auto-generated API docs in production; re-enable locally by
+# setting DOCS_ENABLED=true in .env.
+_docs = os.getenv("DOCS_ENABLED", "false").lower() == "true"
+app = FastAPI(
+    title="News Aggregator",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    redoc_url=None,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ── Security headers ───────────────────────────────────────────────
+
+class _SecurityHeaders(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
+app.add_middleware(_SecurityHeaders)
+
+# ── CORS ───────────────────────────────────────────────────────────
+# When the frontend is served by this server (the default), no CORS
+# config is needed — requests are same-origin.
+# Set ALLOWED_ORIGINS=https://yourdomain.com if the frontend lives
+# on a different host (comma-separated for multiple origins).
+
+_allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if _allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_allowed_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 if FRONTEND_DIR.exists():
     app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+# ------------------------------------------------------------------ #
+# Request models                                                       #
+# ------------------------------------------------------------------ #
+
+class PromptRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=4000)
+
+    @field_validator("prompt")
+    @classmethod
+    def strip_and_require(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("prompt must not be blank")
+        return v
 
 
 # ------------------------------------------------------------------ #
@@ -165,7 +224,8 @@ async def get_news():
 
 
 @app.post("/api/news/refresh")
-async def refresh_news():
+@limiter.limit("5/minute")
+async def refresh_news(request: Request):
     loop = asyncio.get_running_loop()
     positions = portfolio.get_positions()
     symbols = [p["symbol"] for p in positions]
@@ -174,7 +234,7 @@ async def refresh_news():
     news_cache["articles"] = await loop.run_in_executor(
         None, news_aggregator.get_news, symbols
     )
-    news_cache["last_updated"] = datetime.utcnow().isoformat()
+    news_cache["last_updated"] = datetime.now(timezone.utc).isoformat()
     await ws_manager.broadcast(_build_snapshot())
     return {
         "articles": news_cache["articles"],
@@ -219,20 +279,14 @@ async def get_status():
 # ------------------------------------------------------------------ #
 
 @app.post("/api/claude")
-async def claude_prompt(body: dict):
+@limiter.limit("10/minute")
+async def claude_prompt(request: Request, body: PromptRequest):
     """
     Stream Claude's news analysis as Server-Sent Events.
-    Body: {"prompt": "..."}
     Events:
       data: {"type": "chunk", "text": "..."}
       data: {"type": "done"}
     """
-    user_prompt = body.get("prompt", "").strip()
-    if not user_prompt:
-        return {"error": "prompt is required"}
-    if len(user_prompt) > 4000:
-        return {"error": "prompt too long (max 4000 characters)"}
-
     context = ai_client.build_context(
         account=portfolio.get_account(),
         positions=portfolio.get_positions(),
@@ -241,12 +295,12 @@ async def claude_prompt(body: dict):
 
     async def generate():
         try:
-            async for chunk in ai_client.stream_response(user_prompt, context):
+            async for chunk in ai_client.stream_response(body.prompt, context):
                 payload = json.dumps({"type": "chunk", "text": chunk})
                 yield f"data: {payload}\n\n"
         except Exception as e:
             logger.error(f"Claude SSE error: {e}")
-            payload = json.dumps({"type": "chunk", "text": f"\n\n[Error: {e}]"})
+            payload = json.dumps({"type": "chunk", "text": "\n\n[Analysis failed. Please try again.]"})
             yield f"data: {payload}\n\n"
 
         yield 'data: {"type": "done"}\n\n'
@@ -286,4 +340,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("main:app", host=host, port=port, reload=True)

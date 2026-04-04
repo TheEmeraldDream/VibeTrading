@@ -5,8 +5,9 @@
    • REST       : news refresh
 ───────────────────────────────────────────────────────────── */
 
-const API = 'http://localhost:8000';
-const WS  = 'ws://localhost:8000/ws';
+// Auto-detect server URL from the page's own origin — works for local and deployed.
+const API = window.location.origin;
+const WS  = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws';
 
 // Disable raw HTML pass-through in marked (prevents XSS from AI-generated content)
 marked.use({
@@ -86,8 +87,10 @@ function connectWS() {
   };
 
   ws.onmessage = e => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'snapshot') applySnapshot(data);
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'snapshot') applySnapshot(data);
+    } catch (_) {}
   };
 
   ws.onerror = () => {};
@@ -227,7 +230,7 @@ function renderNews() {
 function renderNewsTimestamp(iso) {
   const el = document.getElementById('newsUpdated');
   if (!el || !iso) return;
-  const d = new Date(iso + 'Z');
+  const d = new Date(iso);
   el.textContent = 'Updated ' + fmtTimeAgo(d.toISOString());
 }
 
@@ -354,7 +357,7 @@ async function sendPrompt() {
 }
 
 function updateClaudeMsg(el, text) {
-  el.innerHTML = marked.parse(text) + '<span class="cursor"></span>';
+  el.innerHTML = DOMPurify.sanitize(marked.parse(text)) + '<span class="cursor"></span>';
   const msgs = document.getElementById('chatMessages');
   msgs.scrollTop = msgs.scrollHeight;
 }

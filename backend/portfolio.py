@@ -25,14 +25,13 @@ _PRICE_TTL     = 60   # seconds before re-fetching live prices
 
 
 class PortfolioReader:
-    mode = "demo"
-    connected = False
-
     def __init__(self):
         self._portfolio_cache: dict | None = None
         self._portfolio_cache_time: float = 0
         self._price_cache: dict[str, float] = {}
         self._price_cache_time: float = 0
+        _path = Path(__file__).parent.parent / "local" / "portfolio.json"
+        self.mode = "local" if _path.exists() else "demo"
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                      #
@@ -94,7 +93,7 @@ class PortfolioReader:
                 "buying_power":  a.get("buying_power", 0),
                 "daily_pnl":     a.get("daily_pnl", 0),
                 "daily_pnl_pct": a.get("daily_pnl_pct", 0),
-                "mode":          "demo",
+                "mode":          self.mode,
                 "status":        "ACTIVE",
             }
         base = 100_000.0

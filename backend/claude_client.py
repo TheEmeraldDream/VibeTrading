@@ -4,12 +4,50 @@ Supports Anthropic Claude, OpenAI GPT, and Google Gemini.
 Auto-detects provider from available API keys (priority: Anthropic → OpenAI → Google).
 Set AI_PROVIDER=anthropic|openai|google in .env to override.
 """
+import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
+
+_WEB_SEARCH_TOOL = {
+    "name": "web_search",
+    "description": (
+        "Search the web for current financial news, earnings reports, analyst ratings, "
+        "stock price context, or any real-time information needed to answer the user's question. "
+        "Use this when the cached news context is insufficient or the user asks about something specific."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "A concise, specific search query optimized for financial news and data",
+            }
+        },
+        "required": ["query"],
+    },
+}
+
+
+def _ddg_search(query: str, max_results: int = 6) -> str:
+    """Synchronous DuckDuckGo search. Returns formatted results string."""
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+        if not results:
+            return "No results found."
+        return "\n\n".join(
+            f"**{r.get('title', '')}**\n{r.get('body', '')}\nSource: {r.get('href', '')}"
+            for r in results
+        )
+    except ImportError:
+        return "Web search unavailable."
+    except Exception as e:
+        return f"Search error: {e}"
 
 SYSTEM_PROMPT = """You are a financial news analyst. The user holds a portfolio of stocks and wants to understand how recent news affects their positions.
 
@@ -29,6 +67,13 @@ class AIClient:
     def __init__(self):
         self._provider: str | None = None
         self._client = None
+
+        try:
+            from duckduckgo_search import DDGS  # noqa: F401
+            self._search_enabled = True
+            logger.info("Web search enabled (DuckDuckGo)")
+        except ImportError:
+            self._search_enabled = False
 
         preferred = os.getenv("AI_PROVIDER", "").lower()
         order = ([preferred] if preferred in _PROVIDER_PRIORITY else []) + \
@@ -164,20 +209,54 @@ RECENT NEWS (last 48 hours, newest first):
             async for chunk in self._stream_google(full_message):
                 yield chunk
 
+    async def _web_search(self, query: str) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _ddg_search, query)
+
     async def _stream_anthropic(self, message: str) -> AsyncGenerator[str, None]:
-        try:
-            async with self._client.messages.stream(
-                model="claude-opus-4-6",
-                max_tokens=4096,
-                thinking={"type": "adaptive"},
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": message}],
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield text
-        except Exception as e:
-            logger.error(f"Anthropic stream error: {e}")
-            yield f"\n\n[Error: {e}]"
+        messages = [{"role": "user", "content": message}]
+        tools = [_WEB_SEARCH_TOOL] if self._search_enabled else []
+        max_iterations = 5
+
+        for _ in range(max_iterations):
+            try:
+                stream_kwargs = dict(
+                    model="claude-opus-4-6",
+                    max_tokens=4096,
+                    thinking={"type": "adaptive"},
+                    system=SYSTEM_PROMPT,
+                    messages=messages,
+                )
+                if tools:
+                    stream_kwargs["tools"] = tools
+
+                async with self._client.messages.stream(**stream_kwargs) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+                    final = await stream.get_final_message()
+
+                if final.stop_reason != "tool_use":
+                    break
+
+                tool_results = []
+                for block in final.content:
+                    if block.type == "tool_use" and block.name == "web_search":
+                        query = block.input.get("query", "")
+                        yield f"\n\n*Searching: {query}*\n\n"
+                        result = await self._web_search(query)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        })
+
+                messages.append({"role": "assistant", "content": final.content})
+                messages.append({"role": "user", "content": tool_results})
+
+            except Exception as e:
+                logger.error(f"Anthropic stream error: {e}")
+                yield f"\n\n[Error: {e}]"
+                break
 
     async def _stream_openai(self, message: str) -> AsyncGenerator[str, None]:
         try:
