@@ -113,6 +113,9 @@ header {
 .btn-toggle:hover    { border-color: var(--blue); color: var(--blue); }
 .btn-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
 
+#refreshBtn { border-color: var(--green); color: var(--green); }
+#refreshBtn:hover { opacity: 0.75; }
+
 /* ─── Main grid ─────────────────────────────────────────────── */
 main.grid {
   display: grid;

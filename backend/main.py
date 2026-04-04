@@ -102,6 +102,7 @@ def _build_snapshot() -> dict[str, Any]:
         "positions": portfolio.get_positions(),
         "news": news_cache.get("articles", []),
         "news_updated": news_cache.get("last_updated"),
+        "ai_available": ai_client.available,
     }
 
 

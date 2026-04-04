@@ -101,7 +101,7 @@ function connectWS() {
 function applySnapshot(data) {
   if (data.account) {
     renderAccount(data.account);
-    setBrokerStatus(data.account.mode === 'demo' ? 'demo' : 'connected', data.account.mode);
+    setBrokerStatus(data.ai_available ? 'connected' : 'demo');
   }
   if (data.positions !== undefined) renderHoldings(data.positions);
   if (data.news !== undefined) {
@@ -255,6 +255,7 @@ async function checkClaudeStatus() {
   try {
     const r = await fetch(`${API}/api/status`);
     const d = await r.json();
+    setBrokerStatus(d.ai_available ? 'connected' : 'demo');
     const badge = document.getElementById('claudeBadge');
     badge.className = 'claude-badge ' + (d.ai_available ? 'online' : '');
 
