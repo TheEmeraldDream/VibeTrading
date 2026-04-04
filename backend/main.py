@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from broker import BrokerClient
+from portfolio import PortfolioReader
 from claude_client import AIClient
 from news import NewsAggregator
 
@@ -33,7 +34,7 @@ from news import NewsAggregator
 # Globals                                                              #
 # ------------------------------------------------------------------ #
 
-broker = BrokerClient()
+portfolio = PortfolioReader()
 news_aggregator = NewsAggregator()
 ai_client = AIClient()
 
@@ -78,10 +79,9 @@ async def _news_refresh() -> None:
     """Fetch news for current holdings every 5 minutes and broadcast."""
     while True:
         try:
-            positions = broker.get_positions()
+            positions = portfolio.get_positions()
             symbols = [p["symbol"] for p in positions]
             news_cache["articles"] = news_aggregator.get_news(symbols)
-            from datetime import datetime
             news_cache["last_updated"] = datetime.utcnow().isoformat()
             logger.info(f"News refreshed — {len(news_cache['articles'])} articles for {symbols}")
         except Exception as e:
@@ -98,8 +98,8 @@ async def _news_refresh() -> None:
 def _build_snapshot() -> dict[str, Any]:
     return {
         "type": "snapshot",
-        "account": broker.get_account(),
-        "positions": broker.get_positions(),
+        "account": portfolio.get_account(),
+        "positions": portfolio.get_positions(),
         "news": news_cache.get("articles", []),
         "news_updated": news_cache.get("last_updated"),
     }
@@ -112,7 +112,7 @@ def _build_snapshot() -> dict[str, Any]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(_news_refresh())
-    logger.info(f"News aggregator started — broker mode: {broker.mode}")
+    logger.info(f"News aggregator started — mode: {portfolio.mode}")
     yield
     task.cancel()
 
@@ -137,17 +137,17 @@ if FRONTEND_DIR.exists():
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "broker_mode": broker.mode, "ui": "/app"}
+    return {"status": "ok", "portfolio_mode": portfolio.mode, "ui": "/app"}
 
 
 @app.get("/api/account")
 async def get_account():
-    return broker.get_account()
+    return portfolio.get_account()
 
 
 @app.get("/api/positions")
 async def get_positions():
-    return broker.get_positions()
+    return portfolio.get_positions()
 
 
 @app.get("/api/news")
@@ -160,10 +160,9 @@ async def get_news():
 
 @app.post("/api/news/refresh")
 async def refresh_news():
-    positions = broker.get_positions()
+    positions = portfolio.get_positions()
     symbols = [p["symbol"] for p in positions]
     news_cache["articles"] = news_aggregator.get_news(symbols)
-    from datetime import datetime
     news_cache["last_updated"] = datetime.utcnow().isoformat()
     await ws_manager.broadcast(_build_snapshot())
     return {
@@ -194,8 +193,7 @@ def _env_keys_configured() -> list[str]:
 @app.get("/api/status")
 async def get_status():
     return {
-        "broker_mode": broker.mode,
-        "broker_connected": broker.connected,
+        "portfolio_mode": portfolio.mode,
         "ai_available": ai_client.available,
         "ai_provider": ai_client.provider,
         "ai_keys_in_env": _env_keys_configured(),
@@ -225,8 +223,8 @@ async def claude_prompt(body: dict):
         return {"error": "prompt too long (max 4000 characters)"}
 
     context = ai_client.build_context(
-        account=broker.get_account(),
-        positions=broker.get_positions(),
+        account=portfolio.get_account(),
+        positions=portfolio.get_positions(),
         news=news_cache.get("articles", []),
     )
 
