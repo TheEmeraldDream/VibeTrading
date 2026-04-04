@@ -98,23 +98,38 @@ By default the app shows sample data. To use your actual portfolio, create a fil
       "symbol": "AAPL",
       "qty": 10,
       "avg_entry_price": 170.00,
-      "current_price": 182.00,
-      "unrealized_pl": 120.00,
-      "unrealized_plpc": 7.06
+      "current_price": 182.00
     },
     {
       "symbol": "MSFT",
       "qty": 5,
       "avg_entry_price": 380.00,
-      "current_price": 395.00,
-      "unrealized_pl": 75.00,
-      "unrealized_plpc": 3.95
+      "current_price": 395.00
     }
   ]
 }
 ```
 
-Fill in your own symbols, quantities, and prices. The app picks this up automatically on next launch.
+### Account fields
+
+| Field | Description |
+|---|---|
+| `equity` | Total portfolio value — cash plus the current market value of all positions |
+| `cash` | Uninvested cash sitting in the account |
+| `buying_power` | How much you can currently spend (often 2× cash for a margin account, or equal to cash for a standard account) |
+| `daily_pnl` | Today's dollar gain or loss across the whole account |
+| `daily_pnl_pct` | Today's gain or loss as a percentage of yesterday's closing equity |
+
+### Position fields
+
+| Field | Description |
+|---|---|
+| `symbol` | Stock ticker, e.g. `"AAPL"` |
+| `qty` | Number of shares you hold |
+| `avg_entry_price` | Your average cost per share — used to calculate unrealized P&L |
+| `current_price` | Last known price per share. Only used as a fallback on first load — once the app starts, it fetches live prices from Yahoo Finance automatically and ignores this value |
+
+Fill in your own values and save the file. The app picks it up on next launch and refreshes live prices from Yahoo Finance every five minutes.
 
 ---
 
