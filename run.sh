@@ -19,7 +19,7 @@ pip install -r requirements.txt -q
 (sleep 2 && python3 -m webbrowser "http://localhost:8000/app") &
 
 echo ""
-echo "Starting VibeTrading on http://localhost:8000/app"
+echo "Starting Auction House v2.5 on http://localhost:8000/app"
 echo "Press Ctrl+C to stop."
 echo ""
 uvicorn main:app --reload --port 8000

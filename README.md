@@ -1,4 +1,4 @@
-# VibeTradingNews
+# Auction House v2.5
 
 A personal dashboard that pulls the latest financial news for your stock holdings and uses AI to explain what's moving your portfolio — all in one place.
 

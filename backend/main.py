@@ -221,6 +221,8 @@ async def claude_prompt(body: dict):
     user_prompt = body.get("prompt", "").strip()
     if not user_prompt:
         return {"error": "prompt is required"}
+    if len(user_prompt) > 4000:
+        return {"error": "prompt too long (max 4000 characters)"}
 
     context = ai_client.build_context(
         account=broker.get_account(),

@@ -8,6 +8,13 @@
 const API = 'http://localhost:8000';
 const WS  = 'ws://localhost:8000/ws';
 
+// Disable raw HTML pass-through in marked (prevents XSS from AI-generated content)
+marked.use({
+  renderer: {
+    html: ({ raw }) => String(raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+  },
+});
+
 let ws          = null;
 let streaming   = false;
 let retryTimer  = null;

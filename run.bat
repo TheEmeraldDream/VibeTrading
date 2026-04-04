@@ -50,7 +50,7 @@ start "" /b cmd /c "timeout /t 2 >nul && start http://localhost:8000/app"
 
 :: ── Start server ───────────────────────────────────────────────
 echo.
-echo  VibeTradingNews running at http://localhost:8000/app
+echo  Auction House v2.5 running at http://localhost:8000/app
 echo  Press Ctrl+C to stop.
 echo.
 uvicorn main:app --reload --port 8000
