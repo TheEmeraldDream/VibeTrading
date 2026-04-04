@@ -56,3 +56,7 @@ data/
 
 # ── Local overrides (personal config, never committed) ────────────
 local/
+
+# ── Build artifacts ───────────────────────────────────────────────
+AuctionHouse.exe
+*.spec
