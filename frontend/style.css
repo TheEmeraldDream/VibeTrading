@@ -68,6 +68,12 @@ header {
   gap: 12px;
 }
 
+.news-updated {
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.5px;
+}
+
 /* ─── Status badge ──────────────────────────────────────────── */
 .status-badge {
   display: flex;
@@ -87,10 +93,10 @@ header {
 }
 
 .status-badge.connected .dot    { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.status-badge.demo     .dot    { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+.status-badge.demo     .dot     { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
 .status-badge.disconnected .dot { background: var(--red); }
 
-/* ─── Toggle button ─────────────────────────────────────────── */
+/* ─── Buttons ───────────────────────────────────────────────── */
 .btn-toggle {
   background: transparent;
   border: 1px solid var(--border2);
@@ -104,9 +110,8 @@ header {
   transition: all 0.2s;
 }
 
-.btn-toggle:hover  { border-color: var(--blue); color: var(--blue); }
-.btn-toggle.active { border-color: var(--green); color: var(--green); }
-.btn-toggle.active:hover { border-color: var(--red); color: var(--red); }
+.btn-toggle:hover    { border-color: var(--blue); color: var(--blue); }
+.btn-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ─── Main grid ─────────────────────────────────────────────── */
 main.grid {
@@ -141,15 +146,10 @@ main.grid {
 }
 
 .resize-handle:hover,
-.resize-handle.dragging {
-  background: #1a1a2e;
-}
+.resize-handle.dragging { background: #1a1a2e; }
 
 .resize-handle:hover::after,
-.resize-handle.dragging::after {
-  background: var(--blue);
-  height: 48px;
-}
+.resize-handle.dragging::after { background: var(--blue); height: 48px; }
 
 /* ─── Panel ─────────────────────────────────────────────────── */
 .panel {
@@ -169,6 +169,7 @@ main.grid {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .divider {
@@ -217,65 +218,197 @@ main.grid {
 .metric-value.green { color: var(--green); }
 .metric-value.red   { color: var(--red); }
 
-/* ─── Strategy params ───────────────────────────────────────── */
-.strategy-params {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px;
-  font-size: 11px;
-  color: var(--text2);
-  line-height: 1.8;
+/* ─── Holdings list ─────────────────────────────────────────── */
+.holdings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.strategy-params .param-key   { color: var(--text3); }
-.strategy-params .param-val   { color: var(--text); }
-
-/* ─── Equity chart ──────────────────────────────────────────── */
-.chart-wrap {
-  position: relative;
-  height: 160px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px;
-}
-
-/* ─── Data tables ───────────────────────────────────────────── */
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-
-.data-table th {
-  text-align: left;
-  font-size: 9px;
-  letter-spacing: 1.5px;
+.holdings-empty {
   color: var(--text3);
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  font-size: 11px;
+  padding: 8px 0;
 }
 
-.data-table td {
-  padding: 5px 6px;
+.holding-item {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.holding-item:hover {
+  border-left-color: var(--blue);
+  background: var(--bg3);
+}
+
+.holding-item.active {
+  border-left-color: var(--blue);
+}
+
+.holding-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.holding-sym {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 1px;
+}
+
+.holding-price {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.holding-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.holding-qty { font-size: 10px; }
+
+.holding-pnl {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.holding-news-count {
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+
+/* ─── News panel ────────────────────────────────────────────── */
+.panel#panelCenter {
+  padding: 0;
+  gap: 0;
+}
+
+.news-header {
+  padding: 14px 14px 10px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  background: transparent;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  color: var(--text3);
+  font-family: var(--font);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.chip:hover       { border-color: var(--blue); color: var(--blue); }
+.chip.active      { border-color: var(--blue); color: var(--blue); background: rgba(77, 159, 255, 0.08); }
+
+/* ─── News list ─────────────────────────────────────────────── */
+.news-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+
+.news-empty {
+  color: var(--text3);
+  font-size: 11px;
+  padding: 16px 0;
+  text-align: center;
+}
+
+/* ─── News card ─────────────────────────────────────────────── */
+.news-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s;
+}
+
+.news-card:hover { border-color: var(--border2); }
+
+.news-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.news-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sym-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--blue);
+  background: rgba(77, 159, 255, 0.1);
+  border: 1px solid rgba(77, 159, 255, 0.25);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+
+.news-source { font-size: 9px; letter-spacing: 0.5px; }
+.news-time   { font-size: 9px; letter-spacing: 0.5px; white-space: nowrap; }
+
+.news-headline {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+  text-decoration: none;
+  display: block;
+}
+
+a.news-headline:hover { color: var(--blue); }
+
+.news-summary {
+  font-size: 10.5px;
   color: var(--text2);
-  white-space: nowrap;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-
-.data-table tbody tr:hover td { background: var(--bg2); }
-
-.data-table .sym  { color: var(--text); font-weight: 600; }
-.data-table .pos  { color: var(--green); }
-.data-table .neg  { color: var(--red); }
-.data-table .buy  { color: var(--green); }
-.data-table .sell { color: var(--red); }
-
-.status-filled    { color: var(--green); }
-.status-canceled  { color: var(--text3); }
-.status-pending   { color: var(--yellow); }
 
 /* ─── Chat panel ────────────────────────────────────────────── */
 .panel-chat {
@@ -331,10 +464,9 @@ main.grid {
   font-weight: 600;
 }
 
-.chat-msg.user   .msg-sender  { color: var(--blue); }
-.chat-msg.claude .msg-sender  { color: var(--purple); }
-.chat-msg.system .msg-sender  { color: var(--text3); }
-.chat-msg.update .msg-sender  { color: var(--green); }
+.chat-msg.user   .msg-sender { color: var(--blue); }
+.chat-msg.claude .msg-sender { color: var(--purple); }
+.chat-msg.system .msg-sender { color: var(--text3); }
 
 .msg-text {
   background: var(--bg2);
@@ -347,10 +479,9 @@ main.grid {
   word-break: break-word;
 }
 
-.chat-msg.user   .msg-text { border-color: var(--blue);   border-left: 3px solid var(--blue); }
-.chat-msg.claude .msg-text { border-color: var(--border); border-left: 3px solid var(--purple); }
+.chat-msg.user   .msg-text { border-left: 3px solid var(--blue); }
+.chat-msg.claude .msg-text { border-left: 3px solid var(--purple); }
 .chat-msg.system .msg-text { color: var(--text2); font-size: 11px; }
-.chat-msg.update .msg-text { border-color: var(--green);  border-left: 3px solid var(--green); color: var(--green); }
 
 /* Markdown inside Claude messages */
 .msg-text h1, .msg-text h2, .msg-text h3 { color: var(--text); margin: 8px 0 4px; font-size: 12px; }
@@ -376,7 +507,6 @@ main.grid {
 .msg-text pre code { background: none; padding: 0; color: var(--text); }
 .msg-text strong { color: var(--text); }
 
-/* Streaming cursor */
 .cursor {
   display: inline-block;
   width: 2px;
@@ -386,6 +516,32 @@ main.grid {
   animation: blink 0.8s infinite;
   vertical-align: middle;
 }
+
+/* ─── Analyze bar ───────────────────────────────────────────── */
+.analyze-bar {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.btn-analyze {
+  width: 100%;
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: var(--radius);
+  color: var(--purple);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-analyze:hover    { background: rgba(168, 85, 247, 0.2); border-color: var(--purple); }
+.btn-analyze:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* ─── Chat input ────────────────────────────────────────────── */
 .chat-input-row {

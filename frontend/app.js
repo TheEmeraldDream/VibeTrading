@@ -1,24 +1,22 @@
 /* ─────────────────────────────────────────────────────────────
-   Trading App — Frontend
-   • WebSocket  : live dashboard updates every scan interval
-   • SSE        : streaming Claude responses
-   • REST       : one-shot commands (toggle, prompt)
+   News Aggregator — Frontend
+   • WebSocket  : live snapshots (news + positions)
+   • SSE        : streaming Claude analysis
+   • REST       : news refresh
 ───────────────────────────────────────────────────────────── */
 
-const API   = 'http://localhost:8000';
-const WS    = 'ws://localhost:8000/ws';
+const API = 'http://localhost:8000';
+const WS  = 'ws://localhost:8000/ws';
 
 let ws          = null;
 let streaming   = false;
 let retryTimer  = null;
-let equityChart = null;
-const equityHistory = { labels: [], values: [] };
-const MAX_POINTS = 60;
+let activeFilter = 'ALL';
+let allArticles  = [];
 
 // ─── Init ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initResizeHandles();
-  initChart();
   connectWS();
   checkClaudeStatus();
 });
@@ -26,8 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─── Panel resize ────────────────────────────────────────────
 function initResizeHandles() {
   const grid = document.querySelector('main.grid');
-
-  // Restore saved widths
   const saved = JSON.parse(localStorage.getItem('panelWidths') || '{}');
   if (saved.left)  grid.style.setProperty('--w-left',  saved.left);
   if (saved.right) grid.style.setProperty('--w-right', saved.right);
@@ -35,15 +31,12 @@ function initResizeHandles() {
   document.querySelectorAll('.resize-handle').forEach(handle => {
     handle.addEventListener('mousedown', e => {
       e.preventDefault();
-      const col    = handle.dataset.col;           // 'left' | 'right'
+      const col    = handle.dataset.col;
       const startX = e.clientX;
       const prop   = col === 'left' ? '--w-left' : '--w-right';
       const min    = col === 'left' ? 160 : 220;
       const max    = col === 'left' ? 520 : 600;
-
-      // Read current pixel width from the grid's computed columns
       const cols   = getComputedStyle(grid).gridTemplateColumns.split(' ');
-      // Columns: [w-left] [5px] [1fr-px] [5px] [w-right]
       const startW = col === 'left' ? parseFloat(cols[0]) : parseFloat(cols[4]);
 
       handle.classList.add('dragging');
@@ -51,8 +44,8 @@ function initResizeHandles() {
       document.body.style.userSelect = 'none';
 
       const onMove = e => {
-        const delta  = e.clientX - startX;
-        const newW   = Math.min(max, Math.max(min,
+        const delta = e.clientX - startX;
+        const newW  = Math.min(max, Math.max(min,
           col === 'left' ? startW + delta : startW - delta
         ));
         grid.style.setProperty(prop, newW + 'px');
@@ -62,11 +55,9 @@ function initResizeHandles() {
         handle.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        // Persist
         const cols = getComputedStyle(grid).gridTemplateColumns.split(' ');
         localStorage.setItem('panelWidths', JSON.stringify({
-          left:  cols[0],
-          right: cols[4],
+          left: cols[0], right: cols[4],
         }));
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup',   onUp);
@@ -78,292 +69,220 @@ function initResizeHandles() {
   });
 }
 
-// ─── Equity chart ────────────────────────────────────────────
-function initChart() {
-  const ctx = document.getElementById('equityChart').getContext('2d');
-
-  const gradient = ctx.createLinearGradient(0, 0, 0, 160);
-  gradient.addColorStop(0, 'rgba(0, 217, 126, 0.18)');
-  gradient.addColorStop(1, 'rgba(0, 217, 126, 0)');
-
-  equityChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: equityHistory.labels,
-      datasets: [{
-        data: equityHistory.values,
-        borderColor: '#00d97e',
-        borderWidth: 1.5,
-        backgroundColor: gradient,
-        pointRadius: 0,
-        pointHoverRadius: 3,
-        pointHoverBackgroundColor: '#00d97e',
-        tension: 0.35,
-        fill: true,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 300 },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#181818',
-          borderColor: '#252525',
-          borderWidth: 1,
-          titleColor: '#444',
-          bodyColor: '#d8d8d8',
-          titleFont: { family: "'JetBrains Mono', monospace", size: 9 },
-          bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
-          callbacks: {
-            title: (items) => items[0].label,
-            label: (item) => ' $' + Number(item.raw).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-          },
-        },
-      },
-      scales: {
-        x: {
-          display: false,
-        },
-        y: {
-          position: 'right',
-          grid: { color: '#1a1a1a', drawBorder: false },
-          border: { display: false },
-          ticks: {
-            color: '#444',
-            font: { family: "'JetBrains Mono', monospace", size: 9 },
-            maxTicksLimit: 4,
-            callback: (v) => '$' + Number(v).toLocaleString('en-US', { notation: 'compact' }),
-          },
-        },
-      },
-    },
-  });
-}
-
-function updateChart(equity) {
-  if (!equityChart || equity == null) return;
-  const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  equityHistory.labels.push(now);
-  equityHistory.values.push(Number(equity));
-  if (equityHistory.labels.length > MAX_POINTS) {
-    equityHistory.labels.shift();
-    equityHistory.values.shift();
-  }
-  // Recolor line red if trending down over last 5 points
-  const vals = equityHistory.values;
-  const trending = vals.length >= 2 ? vals[vals.length - 1] - vals[0] : 0;
-  equityChart.data.datasets[0].borderColor = trending >= 0 ? '#00d97e' : '#ff4757';
-  equityChart.update('none');
-}
-
 // ─── WebSocket ───────────────────────────────────────────────
 function connectWS() {
-  setStatus('connecting');
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   ws = new WebSocket(WS);
 
   ws.onopen = () => {
-    setStatus('connected');
-    clearTimeout(retryTimer);
+    setBrokerStatus('connecting');
   };
 
-  ws.onmessage = (evt) => {
-    try {
-      const data = JSON.parse(evt.data);
-      if (data.type === 'snapshot') applySnapshot(data);
-    } catch (_) {}
+  ws.onmessage = e => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'snapshot') applySnapshot(data);
   };
+
+  ws.onerror = () => {};
 
   ws.onclose = () => {
-    setStatus('disconnected');
+    setBrokerStatus('disconnected');
     retryTimer = setTimeout(connectWS, 3000);
-  };
-
-  ws.onerror = () => {
-    ws.close();
   };
 }
 
 function applySnapshot(data) {
-  if (data.account)   renderAccount(data.account);
-  if (data.positions) renderPositions(data.positions);
-  if (data.orders)    renderOrders(data.orders);
-  if (data.metrics)   renderMetrics(data.metrics);
-  if (data.strategy)  renderStrategyParams(data.strategy);
-  if (data.account)   updateToggleButton(data.strategy?.enabled ?? false);
-}
-
-// ─── Status indicator ────────────────────────────────────────
-function setStatus(state) {
-  const badge = document.getElementById('brokerStatus');
-  const modes = { connecting: '', connected: 'connected', disconnected: 'disconnected', demo: 'demo' };
-  badge.className = 'status-badge ' + (modes[state] || '');
-
-  const labels = {
-    connecting:   'CONNECTING…',
-    connected:    'LIVE',
-    disconnected: 'OFFLINE',
-    demo:         'DEMO',
-  };
-  badge.querySelector('.label').textContent = labels[state] || state.toUpperCase();
-}
-
-async function checkClaudeStatus() {
-  try {
-    const res = await fetch(`${API}/api/status`);
-    const s   = await res.json();
-    const el  = document.getElementById('claudeBadge');
-    el.classList.toggle('online', s.claude_available);
-    el.textContent = s.claude_available ? '● ONLINE' : '● OFFLINE';
-
-    // Apply broker mode to status
-    if (s.broker_connected) {
-      setStatus('connected');
-    } else {
-      setStatus('demo');
-      document.getElementById('brokerStatus').classList.add('demo');
-    }
-  } catch (_) {}
+  if (data.account) {
+    renderAccount(data.account);
+    setBrokerStatus(data.account.mode === 'demo' ? 'demo' : 'connected', data.account.mode);
+  }
+  if (data.positions !== undefined) renderHoldings(data.positions);
+  if (data.news !== undefined) {
+    allArticles = data.news;
+    renderFilterChips(data.positions || []);
+    renderNews();
+  }
+  if (data.news_updated) renderNewsTimestamp(data.news_updated);
 }
 
 // ─── Account ─────────────────────────────────────────────────
 function renderAccount(a) {
-  updateChart(a.equity);
   setText('equity',      fmt$(a.equity));
   setText('cash',        fmt$(a.cash));
   setText('buyingPower', fmt$(a.buying_power));
 
   const pnlEl = document.getElementById('dailyPnl');
-  pnlEl.textContent = fmtPnl(a.daily_pnl, a.daily_pnl_pct);
+  pnlEl.textContent = fmtSignPct(a.daily_pnl, a.daily_pnl_pct);
   pnlEl.className = 'metric-value ' + (a.daily_pnl >= 0 ? 'green' : 'red');
-
-  // Show mode on status badge if demo
-  if (a.mode === 'demo') setStatus('demo');
 }
 
-// ─── Metrics ─────────────────────────────────────────────────
-function renderMetrics(m) {
-  const wr = m.win_rate_pct ?? 0;
-  const wrEl = document.getElementById('winRate');
-  wrEl.textContent = wr.toFixed(1) + '%';
-  wrEl.className = 'metric-value ' + (wr >= 50 ? 'green' : wr >= 40 ? 'yellow' : 'red');
+// ─── Holdings ────────────────────────────────────────────────
+function renderHoldings(positions) {
+  const list = document.getElementById('holdingsList');
+  document.getElementById('holdingsCount').textContent = positions.length;
 
-  setText('totalTrades', m.total_closed_trades ?? 0);
-  setText('wins',        m.wins  ?? 0);
-  setText('losses',      m.losses ?? 0);
-}
-
-// ─── Strategy params ─────────────────────────────────────────
-function renderStrategyParams(s) {
-  if (!s) return;
-  const el = document.getElementById('strategyParams');
-  const rows = [
-    ['Strategy', s.name],
-    ['Symbols',  (s.symbols || []).join(', ')],
-    ['RSI buy',  `< ${s.entry_conditions?.rsi_oversold ?? '—'}`],
-    ['MA',       `${s.entry_conditions?.ma_fast ?? '—'} / ${s.entry_conditions?.ma_slow ?? '—'}`],
-    ['Stop',     `${s.exit_conditions?.stop_loss_pct ?? '—'}%`],
-    ['Target',   `${s.exit_conditions?.take_profit_pct ?? '—'}%`],
-    ['Max pos',  s.max_positions ?? '—'],
-    ['Size',     `${s.position_size_pct ?? '—'}%`],
-  ];
-  el.innerHTML = rows.map(([k, v]) =>
-    `<div><span class="param-key">${k}:</span> <span class="param-val">${v}</span></div>`
-  ).join('');
-}
-
-// ─── Positions table ─────────────────────────────────────────
-function renderPositions(positions) {
-  document.getElementById('posCount').textContent = positions.length;
-  const tbody = document.querySelector('#positionsTable tbody');
-  if (positions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="dim" style="text-align:center;padding:12px">No open positions</td></tr>';
+  if (!positions.length) {
+    list.innerHTML = '<div class="holdings-empty">No open positions</div>';
     return;
   }
-  tbody.innerHTML = positions.map(p => {
-    const pnlClass = p.unrealized_pl >= 0 ? 'pos' : 'neg';
-    return `<tr>
-      <td class="sym">${p.symbol}</td>
-      <td>${fmt(p.qty)}</td>
-      <td>${fmt$(p.avg_entry_price)}</td>
-      <td>${fmt$(p.current_price)}</td>
-      <td class="${pnlClass}">${fmtSign$(p.unrealized_pl)}</td>
-      <td class="${pnlClass}">${fmtSignPct(p.unrealized_plpc)}</td>
-    </tr>`;
+
+  list.innerHTML = positions.map(p => {
+    const pnlClass   = p.unrealized_pl >= 0 ? 'green' : 'red';
+    const pnlSign    = p.unrealized_pl >= 0 ? '+' : '';
+    const newsCount  = allArticles.filter(a => a.symbols.includes(p.symbol)).length;
+    const isActive   = activeFilter === p.symbol ? ' active' : '';
+    const newsLabel  = newsCount === 0 ? 'no news' : `${newsCount} article${newsCount === 1 ? '' : 's'}`;
+    return `
+      <div class="holding-item${isActive}" onclick="setFilter('${escHtml(p.symbol)}')">
+        <div class="holding-top">
+          <span class="holding-sym">${escHtml(p.symbol)}</span>
+          <span class="holding-price">$${p.current_price.toFixed(2)}</span>
+        </div>
+        <div class="holding-bottom">
+          <span class="holding-qty dim">${p.qty.toFixed(0)} shares</span>
+          <span class="holding-pnl ${pnlClass}">
+            ${pnlSign}$${Math.abs(p.unrealized_pl).toFixed(2)}
+            (${pnlSign}${p.unrealized_plpc.toFixed(2)}%)
+          </span>
+        </div>
+        <div class="holding-news-count">${newsLabel}</div>
+      </div>`;
   }).join('');
 }
 
-// ─── Orders table ─────────────────────────────────────────────
-function renderOrders(orders) {
-  const tbody = document.querySelector('#ordersTable tbody');
-  if (orders.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="dim" style="text-align:center;padding:12px">No orders</td></tr>';
+// ─── News filter ─────────────────────────────────────────────
+function renderFilterChips(positions) {
+  const container = document.getElementById('filterChips');
+  const syms = positions.map(p => p.symbol);
+
+  const chips = ['ALL', ...syms].map(sym => {
+    const active = sym === activeFilter ? ' active' : '';
+    return `<button class="chip${active}" data-sym="${escHtml(sym)}" onclick="setFilter('${escHtml(sym)}')">${escHtml(sym)}</button>`;
+  });
+  container.innerHTML = chips.join('');
+}
+
+function setFilter(sym) {
+  activeFilter = sym;
+  document.querySelectorAll('.chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.sym === sym);
+  });
+  // Sync holding card active states
+  document.querySelectorAll('.holding-item').forEach(el => {
+    const s = el.querySelector('.holding-sym');
+    el.classList.toggle('active', s && s.textContent === sym);
+  });
+  renderNews();
+}
+
+// ─── News feed ───────────────────────────────────────────────
+function renderNews() {
+  const list = document.getElementById('newsList');
+  const filtered = activeFilter === 'ALL'
+    ? allArticles
+    : allArticles.filter(a => a.symbols.includes(activeFilter));
+
+  document.getElementById('newsCount').textContent = filtered.length;
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="news-empty">${allArticles.length ? 'No news for ' + escHtml(activeFilter) : 'No news available. Click REFRESH NEWS to fetch.'}</div>`;
     return;
   }
-  tbody.innerHTML = orders.map(o => {
-    const sideClass = o.side === 'buy' ? 'buy' : 'sell';
-    const statusClass = {
-      filled: 'status-filled',
-      canceled: 'status-canceled',
-      cancelled: 'status-canceled',
-    }[o.status] || 'status-pending';
 
-    const price = o.filled_avg_price > 0 ? fmt$(o.filled_avg_price) : '—';
-    return `<tr>
-      <td class="sym">${o.symbol}</td>
-      <td class="${sideClass}">${o.side.toUpperCase()}</td>
-      <td>${fmt(o.qty)}</td>
-      <td>${price}</td>
-      <td class="${statusClass}">${o.status.toUpperCase()}</td>
-    </tr>`;
+  list.innerHTML = filtered.map(a => {
+    const sym    = a.symbols[0] || '';
+    const timeAgo = fmtTimeAgo(a.published_at);
+    const hasUrl  = a.url && a.url.startsWith('http');
+    const hTag    = hasUrl
+      ? `<a class="news-headline" href="${escHtml(a.url)}" target="_blank" rel="noopener">${escHtml(a.headline)}</a>`
+      : `<span class="news-headline">${escHtml(a.headline)}</span>`;
+
+    return `
+      <div class="news-card">
+        <div class="news-meta">
+          <div class="news-meta-left">
+            ${sym ? `<span class="sym-tag">${escHtml(sym)}</span>` : ''}
+            <span class="news-source dim">${escHtml(a.source)}</span>
+          </div>
+          <span class="news-time dim">${timeAgo}</span>
+        </div>
+        ${hTag}
+        ${a.summary ? `<p class="news-summary">${escHtml(a.summary)}</p>` : ''}
+      </div>`;
   }).join('');
 }
 
-// ─── Strategy toggle ─────────────────────────────────────────
-function updateToggleButton(enabled) {
-  const btn = document.getElementById('strategyToggle');
-  btn.textContent = `STRATEGY: ${enabled ? 'ON' : 'OFF'}`;
-  btn.className = 'btn-toggle' + (enabled ? ' active' : '');
+function renderNewsTimestamp(iso) {
+  const el = document.getElementById('newsUpdated');
+  if (!el || !iso) return;
+  const d = new Date(iso + 'Z');
+  el.textContent = 'Updated ' + fmtTimeAgo(d.toISOString());
 }
 
-async function toggleStrategy() {
+// ─── News refresh ────────────────────────────────────────────
+async function refreshNews() {
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  btn.textContent = 'REFRESHING…';
   try {
-    const res = await fetch(`${API}/api/strategy/toggle`, { method: 'POST' });
+    const res  = await fetch(`${API}/api/news/refresh`, { method: 'POST' });
     const data = await res.json();
-    updateToggleButton(data.enabled);
-    appendSystemMsg(`Strategy ${data.enabled ? 'enabled' : 'disabled'}.`);
+    allArticles = data.articles || [];
+    renderNews();
+    if (data.last_updated) renderNewsTimestamp(data.last_updated);
   } catch (e) {
-    appendSystemMsg('Failed to toggle strategy: ' + e.message);
+    console.error('Refresh failed:', e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'REFRESH NEWS';
   }
 }
 
-// ─── Claude chat ─────────────────────────────────────────────
-function handleKey(evt) {
-  if (evt.key === 'Enter' && !evt.shiftKey) {
-    evt.preventDefault();
+// ─── Claude status ───────────────────────────────────────────
+async function checkClaudeStatus() {
+  try {
+    const r = await fetch(`${API}/api/status`);
+    const d = await r.json();
+    const badge = document.getElementById('claudeBadge');
+    badge.className = 'claude-badge ' + (d.claude_available ? 'online' : '');
+    if (!d.claude_available) {
+      appendMsg('system', 'Claude is not available — set ANTHROPIC_API_KEY in .env to enable analysis.');
+    }
+  } catch (_) {}
+}
+
+// ─── Claude analysis ─────────────────────────────────────────
+function triggerAnalysis() {
+  const input = document.getElementById('promptInput');
+  input.value = 'Analyze the recent news for my holdings. Identify which articles are most likely driving price movements and explain the connections between news events and price changes.';
+  sendPrompt();
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
     sendPrompt();
   }
 }
 
 async function sendPrompt() {
   if (streaming) return;
-
   const input = document.getElementById('promptInput');
   const prompt = input.value.trim();
   if (!prompt) return;
 
   input.value = '';
-  appendUserMsg(prompt);
-
-  // Disable input while streaming
   streaming = true;
   document.getElementById('sendBtn').disabled = true;
+  document.getElementById('analyzeBtn').disabled = true;
   document.getElementById('claudeBadge').className = 'claude-badge busy';
 
-  // Create Claude message bubble (will stream into it)
-  const msgEl = createClaudeMsg();
+  appendMsg('user', prompt);
+  const claudeEl = appendMsg('claude', '');
+  const textEl   = claudeEl.querySelector('.msg-text');
+  textEl.innerHTML = '<span class="cursor"></span>';
+
+  let accumulated = '';
 
   try {
     const res = await fetch(`${API}/api/claude`, {
@@ -372,138 +291,100 @@ async function sendPrompt() {
       body: JSON.stringify({ prompt }),
     });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
     const reader  = res.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
-    let fullText = '';
+    let   buf     = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // keep incomplete line
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
-        try {
-          const evt = JSON.parse(line.slice(6));
-          if (evt.type === 'chunk') {
-            fullText += evt.text;
-            updateClaudeMsg(msgEl, fullText, true);
-          } else if (evt.type === 'updates' && evt.strategy_updates) {
-            appendUpdateMsg(evt.strategy_updates);
-          } else if (evt.type === 'done') {
-            updateClaudeMsg(msgEl, fullText, false);
-          }
-        } catch (_) {}
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === 'chunk') {
+          accumulated += evt.text;
+          updateClaudeMsg(textEl, accumulated);
+        }
+        if (evt.type === 'done') break;
       }
     }
-
-    // Finalize without cursor
-    updateClaudeMsg(msgEl, fullText, false);
-
   } catch (e) {
-    updateClaudeMsg(msgEl, `Error: ${e.message}`, false);
+    updateClaudeMsg(textEl, accumulated + `\n\n[Connection error: ${e.message}]`);
   } finally {
     streaming = false;
     document.getElementById('sendBtn').disabled = false;
+    document.getElementById('analyzeBtn').disabled = false;
     document.getElementById('claudeBadge').className = 'claude-badge online';
-    // Refresh snapshot after strategy may have changed
-    fetchSnapshot();
+    // Remove cursor
+    const cursor = textEl.querySelector('.cursor');
+    if (cursor) cursor.remove();
+    // Scroll to bottom
+    const msgs = document.getElementById('chatMessages');
+    msgs.scrollTop = msgs.scrollHeight;
   }
 }
 
-// ─── Chat helpers ─────────────────────────────────────────────
-function appendUserMsg(text) {
-  const chat = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'chat-msg user';
-  div.innerHTML = `<span class="msg-sender">YOU</span><span class="msg-text">${escHtml(text)}</span>`;
-  chat.appendChild(div);
-  scrollChat();
+function updateClaudeMsg(el, text) {
+  el.innerHTML = marked.parse(text) + '<span class="cursor"></span>';
+  const msgs = document.getElementById('chatMessages');
+  msgs.scrollTop = msgs.scrollHeight;
 }
 
-function createClaudeMsg() {
-  const chat = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'chat-msg claude';
-  const textEl = document.createElement('span');
-  textEl.className = 'msg-text';
-  textEl.innerHTML = '<span class="cursor"></span>';
-  div.innerHTML = '<span class="msg-sender">CLAUDE</span>';
-  div.appendChild(textEl);
-  chat.appendChild(div);
-  scrollChat();
-  return textEl;
+function appendMsg(type, text) {
+  const msgs    = document.getElementById('chatMessages');
+  const div     = document.createElement('div');
+  div.className = `chat-msg ${type}`;
+  const labels  = { user: 'YOU', claude: 'CLAUDE', system: 'SYSTEM' };
+  div.innerHTML = `
+    <span class="msg-sender">${labels[type] || type.toUpperCase()}</span>
+    <span class="msg-text">${escHtml(text)}</span>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
 }
 
-function updateClaudeMsg(el, text, streaming) {
-  // Render markdown; add cursor if still streaming
-  const rendered = typeof marked !== 'undefined'
-    ? marked.parse(text)
-    : escHtml(text).replace(/\n/g, '<br>');
-  el.innerHTML = rendered + (streaming ? '<span class="cursor"></span>' : '');
-  scrollChat();
+// ─── Status badge ────────────────────────────────────────────
+function setBrokerStatus(state, label) {
+  const el = document.getElementById('brokerStatus');
+  el.className = `status-badge ${state}`;
+  const lbl = { connected: 'LIVE', demo: 'DEMO', disconnected: 'OFFLINE', connecting: 'CONNECTING' };
+  el.querySelector('.label').textContent = label ? label.toUpperCase() : (lbl[state] || state.toUpperCase());
 }
 
-function appendSystemMsg(text) {
-  const chat = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'chat-msg system';
-  div.innerHTML = `<span class="msg-sender">SYSTEM</span><span class="msg-text">${escHtml(text)}</span>`;
-  chat.appendChild(div);
-  scrollChat();
+// ─── Formatting ──────────────────────────────────────────────
+function fmt$(v) {
+  return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function appendUpdateMsg(updates) {
-  const chat = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'chat-msg update';
-  const keys = Object.keys(updates).join(', ');
-  div.innerHTML = `<span class="msg-sender">STRATEGY UPDATED</span>
-    <span class="msg-text">Applied changes: ${escHtml(keys)}</span>`;
-  chat.appendChild(div);
-  scrollChat();
-}
-
-function scrollChat() {
-  const chat = document.getElementById('chatMessages');
-  chat.scrollTop = chat.scrollHeight;
-}
-
-// ─── Snapshot fetch ───────────────────────────────────────────
-async function fetchSnapshot() {
-  try {
-    const res  = await fetch(`${API}/api/snapshot`);
-    const data = await res.json();
-    applySnapshot(data);
-  } catch (_) {}
-}
-
-// ─── Formatters ───────────────────────────────────────────────
-const fmtNum = (n) => (n == null ? '—' : Number(n));
-const fmt  = (n) => fmtNum(n).toLocaleString();
-const fmt$ = (n) => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtSign$ = (n) => n == null ? '—' : (n >= 0 ? '+$' : '-$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtSignPct = (n) => n == null ? '—' : (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%';
-const fmtPnl = (val, pct) => {
+function fmtSignPct(val, pct) {
   const sign = val >= 0 ? '+' : '';
   return `${sign}${fmt$(val)} (${sign}${Number(pct).toFixed(2)}%)`;
-};
-
-function setText(id, val) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = val;
 }
 
-function escHtml(str) {
-  return String(str)
+function fmtTimeAgo(iso) {
+  if (!iso) return '';
+  const ms   = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60)  return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)   return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function escHtml(s) {
+  return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
 }

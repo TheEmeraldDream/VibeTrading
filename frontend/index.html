@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VibeTrading</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111'/%3E%3Cpolyline points='3,25 9,19 14,22 20,11 29,5' stroke='%2300d97e' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='3' cy='25' r='2' fill='%2300d97e'/%3E%3Ccircle cx='29' cy='5' r='2' fill='%2300d97e'/%3E%3C/svg%3E" />
+  <title>VibeTrading — News</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111'/%3E%3Cpath d='M6 10h20M6 16h14M6 22h17' stroke='%2300d97e' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="style.css" />
@@ -14,15 +14,16 @@
   <!-- ═══════════════════ HEADER ═══════════════════ -->
   <header>
     <div class="header-left">
-      <span class="logo">⬡ TRADING</span>
-      <span class="version">v1.0</span>
+      <span class="logo">⬡ NEWSFEED</span>
+      <span class="version">v2.0</span>
     </div>
     <div class="header-right">
+      <span class="news-updated" id="newsUpdated"></span>
       <div class="status-badge" id="brokerStatus">
         <span class="dot"></span><span class="label">CONNECTING…</span>
       </div>
-      <button class="btn-toggle" id="strategyToggle" onclick="toggleStrategy()">
-        STRATEGY: OFF
+      <button class="btn-toggle" id="refreshBtn" onclick="refreshNews()">
+        REFRESH NEWS
       </button>
     </div>
   </header>
@@ -30,7 +31,7 @@
   <!-- ═══════════════════ MAIN GRID ═══════════════════ -->
   <main class="grid">
 
-    <!-- ── LEFT: Account + Metrics ── -->
+    <!-- ── LEFT: Account + Holdings ── -->
     <section class="panel" id="panelLeft" style="min-width:160px">
 
       <div class="panel-title">ACCOUNT</div>
@@ -54,91 +55,63 @@
       </div>
 
       <div class="divider"></div>
-      <div class="panel-title">PERFORMANCE</div>
-      <div class="metric-grid">
-        <div class="metric">
-          <span class="metric-label">WIN RATE</span>
-          <span class="metric-value" id="winRate">—</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">CLOSED TRADES</span>
-          <span class="metric-value" id="totalTrades">—</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">WINS</span>
-          <span class="metric-value green" id="wins">—</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">LOSSES</span>
-          <span class="metric-value red" id="losses">—</span>
-        </div>
+      <div class="panel-title">
+        HOLDINGS
+        <span class="count" id="holdingsCount">0</span>
       </div>
-
-      <div class="divider"></div>
-      <div class="panel-title">STRATEGY PARAMS</div>
-      <div class="strategy-params" id="strategyParams">—</div>
+      <div class="holdings-list" id="holdingsList"></div>
 
     </section>
 
     <div class="resize-handle" data-col="left"></div>
 
-    <!-- ── CENTER: Positions + Orders ── -->
+    <!-- ── CENTER: News Feed ── -->
     <section class="panel" id="panelCenter" style="min-width:200px">
 
-      <div class="panel-title">EQUITY CURVE</div>
-      <div class="chart-wrap">
-        <canvas id="equityChart"></canvas>
+      <div class="news-header">
+        <div class="panel-title">
+          NEWS FEED
+          <span class="count" id="newsCount">0</span>
+        </div>
+        <div class="filter-chips" id="filterChips">
+          <button class="chip active" data-sym="ALL" onclick="setFilter('ALL')">ALL</button>
+        </div>
       </div>
 
-      <div class="divider"></div>
-      <div class="panel-title">
-        POSITIONS
-        <span class="count" id="posCount">0</span>
+      <div class="news-list" id="newsList">
+        <div class="news-empty">Fetching news for your holdings…</div>
       </div>
-      <table class="data-table" id="positionsTable">
-        <thead>
-          <tr>
-            <th>SYMBOL</th><th>QTY</th><th>ENTRY</th><th>PRICE</th><th>P&amp;L</th><th>%</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-
-      <div class="divider"></div>
-      <div class="panel-title">RECENT ORDERS</div>
-      <table class="data-table" id="ordersTable">
-        <thead>
-          <tr>
-            <th>SYMBOL</th><th>SIDE</th><th>QTY</th><th>PRICE</th><th>STATUS</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
 
     </section>
 
     <div class="resize-handle" data-col="right"></div>
 
-    <!-- ── RIGHT: Claude Chat ── -->
+    <!-- ── RIGHT: Claude Analysis ── -->
     <section class="panel panel-chat" id="panelRight" style="min-width:220px">
 
       <div class="panel-title">
-        CLAUDE STRATEGY ASSISTANT
+        CLAUDE NEWS ANALYST
         <span class="claude-badge" id="claudeBadge">●</span>
       </div>
 
       <div class="chat-messages" id="chatMessages">
         <div class="chat-msg system">
           <span class="msg-sender">SYSTEM</span>
-          <span class="msg-text">Claude is connected. Ask me to analyze your strategy, suggest improvements, or modify parameters.</span>
+          <span class="msg-text">Claude is connected. Click ANALYZE to get an automatic analysis of how recent news may be affecting your holdings, or ask a specific question below.</span>
         </div>
+      </div>
+
+      <div class="analyze-bar">
+        <button class="btn-analyze" id="analyzeBtn" onclick="triggerAnalysis()">
+          ▶ ANALYZE NEWS IMPACT
+        </button>
       </div>
 
       <div class="chat-input-row">
         <textarea
           id="promptInput"
           class="chat-input"
-          placeholder="e.g. 'Tighten stop losses and add TSLA to the watchlist' or 'Why is my win rate low?'"
+          placeholder="e.g. 'Why did AAPL drop today?' or 'What's the biggest risk in my portfolio?'"
           rows="3"
           onkeydown="handleKey(event)"
         ></textarea>
@@ -150,10 +123,7 @@
   </main>
 
   <!-- ═══════════════════ SCRIPTS ═══════════════════ -->
-  <!-- marked.js for Claude markdown rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
-  <!-- Chart.js for equity curve -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

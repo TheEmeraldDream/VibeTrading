@@ -1,24 +1,16 @@
 """
-Broker connector — wraps Alpaca API with a mock fallback for demo mode.
+Broker connector — read-only Alpaca wrapper with mock fallback for demo mode.
 Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env to connect live/paper.
 """
 import os
 import logging
 import random
 from datetime import datetime, timedelta
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Try importing alpaca-py; if missing, demo mode only
 try:
     from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import (
-        GetOrdersRequest,
-        MarketOrderRequest,
-        LimitOrderRequest,
-    )
-    from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -46,7 +38,6 @@ class BrokerClient:
                 self._data_client = StockHistoricalDataClient(
                     self.api_key, self.secret_key
                 )
-                # Validate by fetching account
                 self._client.get_account()
                 self.connected = True
                 self.mode = "paper" if self.paper else "live"
@@ -126,6 +117,7 @@ class BrokerClient:
         ]
         result = []
         for sym, qty, entry, current in mock:
+            current += random.uniform(-1, 1)
             pl = (current - entry) * qty
             plpc = (current - entry) / entry * 100
             result.append({
@@ -133,97 +125,18 @@ class BrokerClient:
                 "qty": float(qty),
                 "side": "long",
                 "avg_entry_price": entry,
-                "current_price": current + random.uniform(-1, 1),
-                "market_value": current * qty,
-                "unrealized_pl": pl,
-                "unrealized_plpc": plpc,
+                "current_price": round(current, 2),
+                "market_value": round(current * qty, 2),
+                "unrealized_pl": round(pl, 2),
+                "unrealized_plpc": round(plpc, 2),
             })
         return result
 
     # ------------------------------------------------------------------ #
-    # Orders                                                               #
-    # ------------------------------------------------------------------ #
-
-    def get_orders(self, limit: int = 20) -> list[dict]:
-        if not self.connected:
-            return self._mock_orders()
-        try:
-            orders = self._client.get_orders(
-                filter=GetOrdersRequest(status=QueryOrderStatus.ALL, limit=limit)
-            )
-            return [
-                {
-                    "id": str(o.id),
-                    "symbol": o.symbol,
-                    "side": str(o.side.value),
-                    "qty": float(o.qty or 0),
-                    "filled_qty": float(o.filled_qty or 0),
-                    "filled_avg_price": float(o.filled_avg_price or 0),
-                    "type": str(o.type.value),
-                    "status": str(o.status.value),
-                    "created_at": o.created_at.isoformat() if o.created_at else "",
-                }
-                for o in orders
-            ]
-        except Exception as e:
-            logger.error(f"get_orders error: {e}")
-            return self._mock_orders()
-
-    def _mock_orders(self) -> list[dict]:
-        entries = [
-            ("AAPL", "buy", 15, 178.50, "filled"),
-            ("NVDA", "buy", 5, 620.00, "filled"),
-            ("MSFT", "buy", 8, 390.10, "filled"),
-            ("AMD", "buy", 10, 152.30, "canceled"),
-            ("TSLA", "sell", 6, 245.80, "filled"),
-            ("GOOGL", "buy", 3, 142.20, "pending_new"),
-        ]
-        now = datetime.utcnow()
-        result = []
-        for i, (sym, side, qty, price, status) in enumerate(entries):
-            result.append({
-                "id": f"mock-{i}",
-                "symbol": sym,
-                "side": side,
-                "qty": float(qty),
-                "filled_qty": float(qty) if status == "filled" else 0.0,
-                "filled_avg_price": price if status == "filled" else 0.0,
-                "type": "market",
-                "status": status,
-                "created_at": (now - timedelta(hours=i * 2)).isoformat(),
-            })
-        return result
-
-    # ------------------------------------------------------------------ #
-    # Trade execution                                                      #
-    # ------------------------------------------------------------------ #
-
-    def place_market_order(
-        self, symbol: str, qty: float, side: str
-    ) -> dict[str, Any]:
-        if not self.connected:
-            logger.info(f"[DEMO] Would place {side} {qty} {symbol}")
-            return {"status": "demo_simulated", "symbol": symbol, "qty": qty, "side": side}
-        try:
-            order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
-            req = MarketOrderRequest(
-                symbol=symbol,
-                qty=qty,
-                side=order_side,
-                time_in_force=TimeInForce.DAY,
-            )
-            order = self._client.submit_order(req)
-            return {"status": "submitted", "id": str(order.id), "symbol": symbol}
-        except Exception as e:
-            logger.error(f"place_market_order error: {e}")
-            return {"status": "error", "message": str(e)}
-
-    # ------------------------------------------------------------------ #
-    # Historical bars (for strategy indicators)                            #
+    # Historical bars                                                      #
     # ------------------------------------------------------------------ #
 
     def get_bars(self, symbol: str, limit: int = 50) -> list[dict]:
-        """Return list of OHLCV dicts, newest last."""
         if not self.connected or self._data_client is None:
             return self._mock_bars(symbol, limit)
         try:

@@ -1,7 +1,7 @@
 """
-Trading App — FastAPI backend
+News Aggregator — FastAPI backend
 Run: uvicorn main:app --reload --port 8000
-Open: http://localhost:8000
+Open: http://localhost:8000/app
 """
 import asyncio
 import json
@@ -27,15 +27,20 @@ logger = logging.getLogger(__name__)
 
 from broker import BrokerClient
 from claude_client import ClaudeClient
-from strategy import StrategyEngine
+from news import NewsAggregator
 
 # ------------------------------------------------------------------ #
 # Globals                                                              #
 # ------------------------------------------------------------------ #
 
 broker = BrokerClient()
-strategy_engine = StrategyEngine(broker)
+news_aggregator = NewsAggregator(
+    api_key=os.getenv("ALPACA_API_KEY", ""),
+    secret_key=os.getenv("ALPACA_SECRET_KEY", ""),
+)
 claude_client = ClaudeClient()
+
+news_cache: dict[str, Any] = {"articles": [], "last_updated": None}
 
 
 # ------------------------------------------------------------------ #
@@ -51,7 +56,6 @@ class ConnectionManager:
         self._connections.append(ws)
 
     def disconnect(self, ws: WebSocket) -> None:
-        self._connections.discard(ws) if hasattr(self._connections, "discard") else None
         if ws in self._connections:
             self._connections.remove(ws)
 
@@ -70,31 +74,28 @@ ws_manager = ConnectionManager()
 
 
 # ------------------------------------------------------------------ #
-# Background market scanner                                            #
+# Background news refresh                                              #
 # ------------------------------------------------------------------ #
 
-async def _market_scanner() -> None:
-    """Scan symbols, push orders, broadcast live metrics."""
+async def _news_refresh() -> None:
+    """Fetch news for current holdings every 5 minutes and broadcast."""
     while True:
-        interval = strategy_engine.strategy.get("schedule", {}).get(
-            "scan_interval_seconds", 60
-        )
         try:
-            if strategy_engine.strategy.get("enabled"):
-                actions = strategy_engine.run_once()
-                if actions:
-                    logger.info(f"Scanner actions: {actions}")
+            positions = broker.get_positions()
+            symbols = [p["symbol"] for p in positions]
+            news_cache["articles"] = news_aggregator.get_news(symbols)
+            from datetime import datetime
+            news_cache["last_updated"] = datetime.utcnow().isoformat()
+            logger.info(f"News refreshed — {len(news_cache['articles'])} articles for {symbols}")
         except Exception as e:
-            logger.error(f"Scanner error: {e}")
+            logger.error(f"News refresh error: {e}")
 
-        # Broadcast current state to all WebSocket clients
         try:
-            snapshot = _build_snapshot()
-            await ws_manager.broadcast(snapshot)
+            await ws_manager.broadcast(_build_snapshot())
         except Exception as e:
             logger.error(f"Broadcast error: {e}")
 
-        await asyncio.sleep(interval)
+        await asyncio.sleep(300)
 
 
 def _build_snapshot() -> dict[str, Any]:
@@ -102,9 +103,8 @@ def _build_snapshot() -> dict[str, Any]:
         "type": "snapshot",
         "account": broker.get_account(),
         "positions": broker.get_positions(),
-        "orders": broker.get_orders(limit=10),
-        "metrics": strategy_engine.get_metrics(),
-        "strategy": strategy_engine.get_summary(),
+        "news": news_cache.get("articles", []),
+        "news_updated": news_cache.get("last_updated"),
     }
 
 
@@ -114,13 +114,13 @@ def _build_snapshot() -> dict[str, Any]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(_market_scanner())
-    logger.info(f"Trading app started — broker mode: {broker.mode}")
+    task = asyncio.create_task(_news_refresh())
+    logger.info(f"News aggregator started — broker mode: {broker.mode}")
     yield
     task.cancel()
 
 
-app = FastAPI(title="Trading App", lifespan=lifespan)
+app = FastAPI(title="News Aggregator", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -129,7 +129,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve frontend
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 if FRONTEND_DIR.exists():
     app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
@@ -154,32 +153,26 @@ async def get_positions():
     return broker.get_positions()
 
 
-@app.get("/api/orders")
-async def get_orders():
-    return broker.get_orders()
+@app.get("/api/news")
+async def get_news():
+    return {
+        "articles": news_cache.get("articles", []),
+        "last_updated": news_cache.get("last_updated"),
+    }
 
 
-@app.get("/api/strategy")
-async def get_strategy():
-    return strategy_engine.strategy
-
-
-@app.put("/api/strategy")
-async def update_strategy(updates: dict):
-    strategy_engine.apply_updates(updates)
-    return {"status": "updated", "strategy": strategy_engine.strategy}
-
-
-@app.post("/api/strategy/toggle")
-async def toggle_strategy():
-    current = strategy_engine.strategy.get("enabled", False)
-    strategy_engine.apply_updates({"enabled": not current})
-    return {"enabled": strategy_engine.strategy["enabled"]}
-
-
-@app.get("/api/metrics")
-async def get_metrics():
-    return strategy_engine.get_metrics()
+@app.post("/api/news/refresh")
+async def refresh_news():
+    positions = broker.get_positions()
+    symbols = [p["symbol"] for p in positions]
+    news_cache["articles"] = news_aggregator.get_news(symbols)
+    from datetime import datetime
+    news_cache["last_updated"] = datetime.utcnow().isoformat()
+    await ws_manager.broadcast(_build_snapshot())
+    return {
+        "articles": news_cache["articles"],
+        "last_updated": news_cache["last_updated"],
+    }
 
 
 @app.get("/api/snapshot")
@@ -193,7 +186,9 @@ async def get_status():
         "broker_mode": broker.mode,
         "broker_connected": broker.connected,
         "claude_available": claude_client.available,
-        "strategy_enabled": strategy_engine.strategy.get("enabled", False),
+        "news_demo": news_aggregator.demo,
+        "news_article_count": len(news_cache.get("articles", [])),
+        "news_last_updated": news_cache.get("last_updated"),
     }
 
 
@@ -204,11 +199,10 @@ async def get_status():
 @app.post("/api/claude")
 async def claude_prompt(body: dict):
     """
-    Stream Claude's response as Server-Sent Events.
+    Stream Claude's news analysis as Server-Sent Events.
     Body: {"prompt": "..."}
     Events:
       data: {"type": "chunk", "text": "..."}
-      data: {"type": "updates", "strategy_updates": {...}}
       data: {"type": "done"}
     """
     user_prompt = body.get("prompt", "").strip()
@@ -216,28 +210,16 @@ async def claude_prompt(body: dict):
         return {"error": "prompt is required"}
 
     context = claude_client.build_context(
-        strategy=strategy_engine.strategy,
         account=broker.get_account(),
         positions=broker.get_positions(),
-        metrics=strategy_engine.get_metrics(),
+        news=news_cache.get("articles", []),
     )
 
     async def generate():
-        full_text = ""
         try:
             async for chunk in claude_client.stream_response(user_prompt, context):
-                full_text += chunk
                 payload = json.dumps({"type": "chunk", "text": chunk})
                 yield f"data: {payload}\n\n"
-
-            # After full response, check for strategy updates
-            updates = claude_client.extract_strategy_updates(full_text)
-            if updates:
-                strategy_engine.apply_updates(updates)
-                payload = json.dumps({"type": "updates", "strategy_updates": updates})
-                yield f"data: {payload}\n\n"
-                logger.info(f"Applied Claude strategy updates: {list(updates.keys())}")
-
         except Exception as e:
             logger.error(f"Claude SSE error: {e}")
             payload = json.dumps({"type": "chunk", "text": f"\n\n[Error: {e}]"})
@@ -262,7 +244,6 @@ async def claude_prompt(body: dict):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
-    # Push immediate snapshot on connect
     try:
         await websocket.send_json(_build_snapshot())
     except Exception:
@@ -270,7 +251,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Just keep the connection alive; scanner handles broadcasting
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
