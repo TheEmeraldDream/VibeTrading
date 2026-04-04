@@ -20,10 +20,7 @@ exit /b 1
 :found_python
 
 :: ── Free port 8000 if already in use ────────────────────────────
-for /f "tokens=5" %%p in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"') do (
-    echo Stopping old server (PID %%p)...
-    taskkill /PID %%p /F >nul 2>&1
-)
+powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 8000 -State Listen -EA Stop | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -EA SilentlyContinue }; Start-Sleep -Milliseconds 500 } catch {}" >nul 2>&1
 
 :: ── Create venv if missing ─────────────────────────────────────
 if not exist "venv\Scripts\activate.bat" (
