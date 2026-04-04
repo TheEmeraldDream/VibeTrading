@@ -97,29 +97,39 @@ class NewsAggregator:
             try:
                 items = yf.Ticker(sym).news or []
                 for item in items[:per_sym]:
-                    url = item.get("link") or item.get("url", "")
-                    uid = item.get("uuid") or url
+                    # yfinance >= 0.2.50 wraps everything under item['content']
+                    c   = item.get("content") or item
+                    uid = item.get("id") or c.get("id") or c.get("uuid", "")
                     if not uid or uid in seen:
                         continue
                     seen.add(uid)
 
-                    pub_ts = item.get("providerPublishTime") or item.get("published", 0)
-                    try:
-                        pub_dt = datetime.fromtimestamp(int(pub_ts), tz=timezone.utc)
-                    except (TypeError, ValueError, OSError):
-                        pub_dt = datetime.now(timezone.utc)
+                    # URL: prefer canonical (direct to source), fall back to clickThrough
+                    canonical = (c.get("canonicalUrl") or {}).get("url", "")
+                    clickthru = (c.get("clickThroughUrl") or {}).get("url", "")
+                    url = canonical or clickthru or c.get("link", "")
 
-                    related  = item.get("relatedTickers") or [sym]
-                    relevant = [s for s in related if s in symbols] or [sym]
+                    # Published date
+                    pub_raw = c.get("pubDate") or c.get("displayTime", "")
+                    try:
+                        pub_dt = datetime.fromisoformat(pub_raw.replace("Z", "+00:00"))
+                    except (ValueError, AttributeError):
+                        pub_ts = c.get("providerPublishTime", 0)
+                        try:
+                            pub_dt = datetime.fromtimestamp(int(pub_ts), tz=timezone.utc)
+                        except (TypeError, ValueError, OSError):
+                            pub_dt = datetime.now(timezone.utc)
+
+                    source = (c.get("provider") or {}).get("displayName") or c.get("publisher", "")
 
                     articles.append({
                         "id":           uid,
-                        "headline":     item.get("title") or "",
-                        "summary":      item.get("summary") or "",
+                        "headline":     c.get("title") or "",
+                        "summary":      c.get("summary") or c.get("description") or "",
                         "author":       "",
-                        "source":       item.get("publisher") or "",
+                        "source":       source,
                         "url":          url,
-                        "symbols":      relevant,
+                        "symbols":      [sym],
                         "published_at": pub_dt.isoformat(),
                     })
             except Exception as e:
