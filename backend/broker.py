@@ -2,10 +2,12 @@
 Broker connector — read-only Alpaca wrapper with mock fallback for demo mode.
 Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env to connect live/paper.
 """
+import json
 import os
 import logging
 import random
 from datetime import datetime, timedelta
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,29 @@ class BrokerClient:
             logger.error(f"get_account error: {e}")
             return self._mock_account()
 
+    def _local_portfolio(self) -> dict | None:
+        path = Path(__file__).parent.parent / "local" / "portfolio.json"
+        if path.exists():
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return None
+
     def _mock_account(self) -> dict:
+        local = self._local_portfolio()
+        if local and "account" in local:
+            a = local["account"]
+            return {
+                "equity":        a.get("equity", 0),
+                "cash":          a.get("cash", 0),
+                "buying_power":  a.get("buying_power", 0),
+                "daily_pnl":     a.get("daily_pnl", 0),
+                "daily_pnl_pct": a.get("daily_pnl_pct", 0),
+                "mode":          "demo",
+                "status":        "ACTIVE",
+            }
         base = 100_000.0
         pnl = random.uniform(-500, 1500)
         return {
@@ -110,6 +134,24 @@ class BrokerClient:
             return self._mock_positions()
 
     def _mock_positions(self) -> list[dict]:
+        local = self._local_portfolio()
+        if local and "positions" in local:
+            result = []
+            for p in local["positions"]:
+                qty     = float(p["qty"])
+                price   = float(p["current_price"])
+                entry   = float(p["avg_entry_price"])
+                result.append({
+                    "symbol":           p["symbol"],
+                    "qty":              qty,
+                    "side":             "long",
+                    "avg_entry_price":  entry,
+                    "current_price":    price,
+                    "market_value":     round(price * qty, 2),
+                    "unrealized_pl":    float(p["unrealized_pl"]),
+                    "unrealized_plpc":  float(p["unrealized_plpc"]),
+                })
+            return result
         mock = [
             ("AAPL", 15, 178.50, 184.20),
             ("NVDA", 5, 620.00, 645.80),

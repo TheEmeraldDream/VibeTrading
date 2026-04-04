@@ -53,3 +53,6 @@ yarn-error.log*
 *.sqlite
 *.sqlite3
 data/
+
+# ── Local overrides (personal config, never committed) ────────────
+local/
