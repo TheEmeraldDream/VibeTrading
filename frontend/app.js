@@ -190,23 +190,28 @@ function renderNews() {
   }
 
   list.innerHTML = filtered.map(a => {
-    const sym    = a.symbols[0] || '';
+    const sym     = a.symbols[0] || '';
     const timeAgo = fmtTimeAgo(a.published_at);
     const hasUrl  = a.url && a.url.startsWith('http');
-    const hTag    = hasUrl
-      ? `<a class="news-headline" href="${escHtml(a.url)}" target="_blank" rel="noopener">${escHtml(a.headline)}</a>`
+
+    const headline = hasUrl
+      ? `<a class="news-headline" href="${escHtml(a.url)}" target="_blank" rel="noopener">${escHtml(a.headline)}<span class="ext-icon">↗</span></a>`
       : `<span class="news-headline">${escHtml(a.headline)}</span>`;
+
+    const source = hasUrl
+      ? `<a class="news-source news-source-link" href="${escHtml(a.url)}" target="_blank" rel="noopener">${escHtml(a.source)}</a>`
+      : `<span class="news-source dim">${escHtml(a.source)}</span>`;
 
     return `
       <div class="news-card">
         <div class="news-meta">
           <div class="news-meta-left">
             ${sym ? `<span class="sym-tag">${escHtml(sym)}</span>` : ''}
-            <span class="news-source dim">${escHtml(a.source)}</span>
+            ${source}
           </div>
           <span class="news-time dim">${timeAgo}</span>
         </div>
-        ${hTag}
+        ${headline}
         ${a.summary ? `<p class="news-summary">${escHtml(a.summary)}</p>` : ''}
       </div>`;
   }).join('');

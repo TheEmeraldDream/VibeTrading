@@ -386,8 +386,17 @@ main.grid {
   padding: 1px 6px;
 }
 
-.news-source { font-size: 9px; letter-spacing: 0.5px; }
-.news-time   { font-size: 9px; letter-spacing: 0.5px; white-space: nowrap; }
+.news-source      { font-size: 9px; letter-spacing: 0.5px; }
+.news-time        { font-size: 9px; letter-spacing: 0.5px; white-space: nowrap; }
+
+.news-source-link {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--text3);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.news-source-link:hover { color: var(--blue); text-decoration: underline; }
 
 .news-headline {
   font-size: 12px;
@@ -398,7 +407,16 @@ main.grid {
   display: block;
 }
 
-a.news-headline:hover { color: var(--blue); }
+a.news-headline:hover         { color: var(--blue); }
+a.news-headline:hover .ext-icon { opacity: 1; }
+
+.ext-icon {
+  font-size: 9px;
+  margin-left: 4px;
+  opacity: 0.3;
+  transition: opacity 0.15s;
+  vertical-align: super;
+}
 
 .news-summary {
   font-size: 10.5px;
