@@ -1,6 +1,8 @@
 """
-Claude API integration — streams financial news analysis.
-Uses claude-opus-4-6 with adaptive thinking.
+AI client — streams financial news analysis.
+Supports Anthropic Claude, OpenAI GPT, and Google Gemini.
+Auto-detects provider from available API keys (priority: Anthropic → OpenAI → Google).
+Set AI_PROVIDER=anthropic|openai|google in .env to override.
 """
 import logging
 import os
@@ -19,26 +21,77 @@ Your job:
 
 Keep responses concise and actionable. Lead with the most impactful observations for the user's actual holdings."""
 
+_PROVIDER_PRIORITY = ["anthropic", "openai", "google"]
 
-class ClaudeClient:
+
+class AIClient:
     def __init__(self):
-        self.api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        self._provider: str | None = None
         self._client = None
 
-        if not self.api_key:
-            logger.warning("ANTHROPIC_API_KEY not set — Claude assistant disabled")
-            return
+        preferred = os.getenv("AI_PROVIDER", "").lower()
+        order = ([preferred] if preferred in _PROVIDER_PRIORITY else []) + \
+                [p for p in _PROVIDER_PRIORITY if p != preferred]
 
-        try:
-            import anthropic
-            self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
-            logger.info("Claude client initialized (claude-opus-4-6)")
-        except ImportError:
-            logger.warning("anthropic package not installed")
+        for provider in order:
+            if self._init_provider(provider):
+                break
+
+        if not self._provider:
+            logger.warning("No AI API key found — AI assistant disabled")
+
+    def _init_provider(self, provider: str) -> bool:
+        if provider == "anthropic":
+            api_key = os.getenv("ANTHROPIC_API_KEY", "")
+            if not api_key:
+                return False
+            try:
+                import anthropic
+                self._client = anthropic.AsyncAnthropic(api_key=api_key)
+                self._provider = "anthropic"
+                logger.info("AI client initialized (claude-opus-4-6)")
+                return True
+            except ImportError:
+                logger.warning("anthropic package not installed")
+                return False
+
+        if provider == "openai":
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            if not api_key:
+                return False
+            try:
+                import openai
+                self._client = openai.AsyncOpenAI(api_key=api_key)
+                self._provider = "openai"
+                logger.info("AI client initialized (gpt-4o)")
+                return True
+            except ImportError:
+                logger.warning("openai package not installed")
+                return False
+
+        if provider == "google":
+            api_key = os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+            if not api_key:
+                return False
+            try:
+                from google import genai
+                self._client = genai.Client(api_key=api_key)
+                self._provider = "google"
+                logger.info("AI client initialized (gemini-2.0-flash)")
+                return True
+            except ImportError:
+                logger.warning("google-genai package not installed")
+                return False
+
+        return False
 
     @property
     def available(self) -> bool:
         return self._client is not None
+
+    @property
+    def provider(self) -> str:
+        return self._provider or "none"
 
     def build_context(
         self,
@@ -86,21 +139,71 @@ RECENT NEWS (last 7 days, newest first):
         context: str,
     ) -> AsyncGenerator[str, None]:
         if not self.available:
-            yield "Claude is not available. Please set ANTHROPIC_API_KEY in your .env file."
+            yield (
+                "No AI provider configured. "
+                "Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY in your .env file."
+            )
             return
 
         full_message = f"{context}\n\nUser request: {user_prompt}"
 
+        if self._provider == "anthropic":
+            async for chunk in self._stream_anthropic(full_message):
+                yield chunk
+        elif self._provider == "openai":
+            async for chunk in self._stream_openai(full_message):
+                yield chunk
+        elif self._provider == "google":
+            async for chunk in self._stream_google(full_message):
+                yield chunk
+
+    async def _stream_anthropic(self, message: str) -> AsyncGenerator[str, None]:
         try:
             async with self._client.messages.stream(
                 model="claude-opus-4-6",
                 max_tokens=4096,
                 thinking={"type": "adaptive"},
                 system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": full_message}],
+                messages=[{"role": "user", "content": message}],
             ) as stream:
                 async for text in stream.text_stream:
                     yield text
         except Exception as e:
-            logger.error(f"Claude stream error: {e}")
-            yield f"\n\n[Error communicating with Claude: {e}]"
+            logger.error(f"Anthropic stream error: {e}")
+            yield f"\n\n[Error: {e}]"
+
+    async def _stream_openai(self, message: str) -> AsyncGenerator[str, None]:
+        try:
+            stream = await self._client.chat.completions.create(
+                model="gpt-4o",
+                max_tokens=4096,
+                stream=True,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": message},
+                ],
+            )
+            async for chunk in stream:
+                text = chunk.choices[0].delta.content
+                if text:
+                    yield text
+        except Exception as e:
+            logger.error(f"OpenAI stream error: {e}")
+            yield f"\n\n[Error: {e}]"
+
+    async def _stream_google(self, message: str) -> AsyncGenerator[str, None]:
+        try:
+            from google.genai import types
+            async for chunk in self._client.aio.models.generate_content_stream(
+                model="gemini-2.0-flash",
+                contents=message,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    max_output_tokens=4096,
+                ),
+            ):
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            logger.error(f"Gemini stream error: {e}")
+            yield f"\n\n[Error: {e}]"

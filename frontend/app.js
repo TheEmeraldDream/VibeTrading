@@ -249,9 +249,9 @@ async function checkClaudeStatus() {
     const r = await fetch(`${API}/api/status`);
     const d = await r.json();
     const badge = document.getElementById('claudeBadge');
-    badge.className = 'claude-badge ' + (d.claude_available ? 'online' : '');
-    if (!d.claude_available) {
-      appendMsg('system', 'Claude is not available — set ANTHROPIC_API_KEY in .env to enable analysis.');
+    badge.className = 'claude-badge ' + (d.ai_available ? 'online' : '');
+    if (!d.ai_available) {
+      appendMsg('system', 'No AI provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY in .env to enable analysis.');
     }
   } catch (_) {}
 }

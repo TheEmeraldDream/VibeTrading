@@ -26,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from broker import BrokerClient
-from claude_client import ClaudeClient
+from ai_client import AIClient
 from news import NewsAggregator
 
 # ------------------------------------------------------------------ #
@@ -35,7 +35,7 @@ from news import NewsAggregator
 
 broker = BrokerClient()
 news_aggregator = NewsAggregator()
-claude_client = ClaudeClient()
+ai_client = AIClient()
 
 news_cache: dict[str, Any] = {"articles": [], "last_updated": None}
 
@@ -182,7 +182,8 @@ async def get_status():
     return {
         "broker_mode": broker.mode,
         "broker_connected": broker.connected,
-        "claude_available": claude_client.available,
+        "ai_available": ai_client.available,
+        "ai_provider": ai_client.provider,
         "news_demo": news_aggregator.demo,
         "news_article_count": len(news_cache.get("articles", [])),
         "news_last_updated": news_cache.get("last_updated"),
@@ -206,7 +207,7 @@ async def claude_prompt(body: dict):
     if not user_prompt:
         return {"error": "prompt is required"}
 
-    context = claude_client.build_context(
+    context = ai_client.build_context(
         account=broker.get_account(),
         positions=broker.get_positions(),
         news=news_cache.get("articles", []),
@@ -214,7 +215,7 @@ async def claude_prompt(body: dict):
 
     async def generate():
         try:
-            async for chunk in claude_client.stream_response(user_prompt, context):
+            async for chunk in ai_client.stream_response(user_prompt, context):
                 payload = json.dumps({"type": "chunk", "text": chunk})
                 yield f"data: {payload}\n\n"
         except Exception as e:
