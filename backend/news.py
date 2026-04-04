@@ -1,21 +1,13 @@
 """
-News aggregator — tiered news fetching:
-  1. Alpaca News API  (when API keys present — real news + URLs)
-  2. Yahoo Finance    (yfinance — always available, real news + URLs, no key needed)
-  3. Mock data        (last resort if yfinance unavailable)
+News aggregator — fetches financial news via:
+  1. Yahoo Finance (yfinance — always available, real news + URLs, no key needed)
+  2. Mock data    (last resort if yfinance unavailable)
 """
 import logging
 import random
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
-
-try:
-    from alpaca.data.historical.news import NewsClient
-    from alpaca.data.requests import NewsRequest
-    ALPACA_NEWS_AVAILABLE = True
-except ImportError:
-    ALPACA_NEWS_AVAILABLE = False
 
 try:
     import yfinance as yf
@@ -26,63 +18,22 @@ except ImportError:
 
 
 class NewsAggregator:
-    def __init__(self, api_key: str, secret_key: str):
-        self._alpaca_client = None
-
-        if ALPACA_NEWS_AVAILABLE and api_key and secret_key:
-            try:
-                self._alpaca_client = NewsClient(api_key=api_key, secret_key=secret_key)
-                logger.info("News: Alpaca News API")
-            except Exception as e:
-                logger.warning(f"Alpaca news init failed: {e}")
-
-        if not self._alpaca_client:
-            if YFINANCE_AVAILABLE:
-                logger.info("News: Yahoo Finance (yfinance)")
-            else:
-                logger.warning("News: mock data only")
+    def __init__(self):
+        if YFINANCE_AVAILABLE:
+            logger.info("News: Yahoo Finance (yfinance)")
+        else:
+            logger.warning("News: mock data only")
 
     @property
     def demo(self) -> bool:
-        return self._alpaca_client is None and not YFINANCE_AVAILABLE
+        return not YFINANCE_AVAILABLE
 
     def get_news(self, symbols: list[str], limit: int = 40) -> list[dict]:
         if not symbols:
             return []
-        if self._alpaca_client:
-            return self._alpaca_news(symbols, limit)
         if YFINANCE_AVAILABLE:
             return self._yfinance_news(symbols, limit)
         return self._mock_news(symbols)
-
-    # ------------------------------------------------------------------ #
-    # Alpaca                                                               #
-    # ------------------------------------------------------------------ #
-
-    def _alpaca_news(self, symbols: list[str], limit: int) -> list[dict]:
-        try:
-            end   = datetime.now(timezone.utc)
-            start = end - timedelta(days=7)
-            req   = NewsRequest(symbols=symbols, start=start, end=end, limit=limit)
-            resp  = self._alpaca_client.get_news(req)
-            arts  = [self._fmt_alpaca(a) for a in resp.news]
-            arts.sort(key=lambda a: a["published_at"], reverse=True)
-            return arts
-        except Exception as e:
-            logger.error(f"Alpaca news error: {e}")
-            return self._yfinance_news(symbols, limit) if YFINANCE_AVAILABLE else self._mock_news(symbols)
-
-    def _fmt_alpaca(self, a) -> dict:
-        return {
-            "id":           str(a.id),
-            "headline":     a.headline,
-            "summary":      a.summary or "",
-            "author":       a.author or "",
-            "source":       a.source or "",
-            "url":          a.url or "",
-            "symbols":      list(a.symbols or []),
-            "published_at": a.created_at.isoformat() if a.created_at else "",
-        }
 
     # ------------------------------------------------------------------ #
     # Yahoo Finance (yfinance)                                             #

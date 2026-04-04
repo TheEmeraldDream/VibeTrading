@@ -34,10 +34,7 @@ from news import NewsAggregator
 # ------------------------------------------------------------------ #
 
 broker = BrokerClient()
-news_aggregator = NewsAggregator(
-    api_key=os.getenv("ALPACA_API_KEY", ""),
-    secret_key=os.getenv("ALPACA_SECRET_KEY", ""),
-)
+news_aggregator = NewsAggregator()
 claude_client = ClaudeClient()
 
 news_cache: dict[str, Any] = {"articles": [], "last_updated": None}

@@ -1,6 +1,6 @@
-# VibeTrading
+# VibeTradingNews
 
-> A dark minimalist news aggregator for your stock holdings — powered by Alpaca and Claude AI.
+A dark minimalist news aggregator for your stock holdings — powered by Claude AI.
 
 Pulls recent financial news for every position in your portfolio, correlates it with price movements, and lets you ask Claude to explain what's actually driving your P&L.
 
@@ -8,8 +8,8 @@ Pulls recent financial news for every position in your portfolio, correlates it 
 
 ## What it does
 
-- **Holdings dashboard** — equity, cash, daily P&L, and all open positions update in real time over WebSocket.
-- **News feed** — fetches the last 7 days of financial news for your held symbols via the Alpaca news API. Refreshes automatically every 5 minutes.
+- **Holdings dashboard** — equity, cash, daily P&L, and all open positions displayed in the left panel.
+- **News feed** — fetches recent financial news for your held symbols via Yahoo Finance. Refreshes automatically every 5 minutes.
 - **Per-holding news filter** — click any holding in the left panel to filter the news feed to that symbol. Each holding shows how many articles are linked to it.
 - **Claude news analyst** — hit **ANALYZE** for an automatic breakdown of which news events are likely driving price movements in your portfolio. Or ask anything in plain English.
 - **Demo mode** — runs without any API keys using realistic mock data for both positions and news.
@@ -19,7 +19,6 @@ Pulls recent financial news for every position in your portfolio, correlates it 
 ## Requirements
 
 - Python 3.11+
-- An [Alpaca](https://alpaca.markets) account — paper trading is free
 - An [Anthropic](https://console.anthropic.com) API key for Claude
 
 ---
@@ -29,11 +28,11 @@ Pulls recent financial news for every position in your portfolio, correlates it 
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/TheEmeraldDream/VibeTrading.git
-cd VibeTrading
+git clone https://github.com/TheEmeraldDream/VibeTradingNews.git
+cd VibeTradingNews
 ```
 
-### 2. Configure your keys
+### 2. Configure your key
 
 ```bash
 cp .env.example .env
@@ -41,12 +40,9 @@ cp .env.example .env
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...        # Powers Claude analysis
-ALPACA_API_KEY=PKxxxxxxxxxxxxxxxx   # From your Alpaca dashboard
-ALPACA_SECRET_KEY=xxxxxxxxxxxxxxxx  # Your Alpaca secret
-ALPACA_PAPER=true                   # true = paper trading (recommended)
 ```
 
-> **No keys?** The app boots in **demo mode** automatically — mock positions and mock news, no credentials needed.
+> **No key?** The app boots in **demo mode** automatically — mock positions and mock news, no credentials needed.
 
 ### 3. Launch
 
@@ -60,7 +56,7 @@ run.bat
 chmod +x run.sh && ./run.sh
 ```
 
-The script creates a virtual environment, installs dependencies, and opens your browser. Then open `http://localhost:8000/app`.
+The script creates a virtual environment, installs dependencies, and opens your browser at `http://localhost:8000/app`.
 
 ---
 
@@ -83,7 +79,7 @@ uvicorn main:app --reload --port 8000
 Shows equity, cash, buying power, and daily P&L at the top. Below that is a list of your open positions with current price, unrealized P&L, and a count of how many news articles are linked to each symbol. Clicking a holding filters the news feed.
 
 ### Center panel — News Feed
-Displays the last 7 days of news for your held symbols, sorted newest first. Use the filter chips at the top to narrow by symbol, or click **ALL** to see everything. Article headlines link out to the source when a URL is available. News refreshes automatically every 5 minutes — or hit **REFRESH NEWS** in the header to force it.
+Displays recent news for your held symbols, sorted newest first. Use the filter chips at the top to narrow by symbol, or click **ALL** to see everything. Article headlines link out to the source when a URL is available. News refreshes automatically every 5 minutes — or hit **REFRESH NEWS** in the header to force it.
 
 ### Right panel — Claude News Analyst
 Click **ANALYZE NEWS IMPACT** for an automatic analysis of how recent news may be affecting your holdings. Claude gets your full portfolio context (positions, prices, P&L) and the 25 most recent articles before responding.
@@ -93,6 +89,34 @@ You can also ask specific questions:
 - `"What's the biggest risk in my portfolio based on recent news?"`
 - `"Summarize the AAPL news from this week"`
 - `"Which of my holdings has the most negative news sentiment?"`
+
+---
+
+## Local portfolio
+
+To use your real holdings locally without affecting the shipped version, create `local/portfolio.json` (this folder is gitignored):
+
+```json
+{
+  "account": {
+    "equity": 42242.65,
+    "cash": 150.75,
+    "buying_power": 150.75,
+    "daily_pnl": 139.55,
+    "daily_pnl_pct": 0.33
+  },
+  "positions": [
+    {
+      "symbol": "VTI",
+      "qty": 10,
+      "avg_entry_price": 200.00,
+      "current_price": 215.00,
+      "unrealized_pl": 150.00,
+      "unrealized_plpc": 7.5
+    }
+  ]
+}
+```
 
 ---
 
@@ -115,20 +139,20 @@ You can also ask specific questions:
 │         │           Backend  │                     │         │
 │         │                    │                     │         │
 │  ┌──────┴──────┐   ┌─────────┴────────┐   ┌───────┴──────┐  │
-│  │   Broker    │   │   News Service   │   │  AI Service  │  │
-│  │ (read-only) │   │  refresh every   │   │              │  │
+│  │  Portfolio  │   │   News Service   │   │  AI Service  │  │
+│  │   Reader   │   │  refresh every   │   │              │  │
 │  │             │   │    5 minutes     │   │              │  │
-│  └──────┬──────┘   └────────┬─────────┘   └──────┬───────┘  │
-└─────────┼───────────────────┼──────────────────── ┼──────────┘
-          │                   │                     │
-   ┌──────┴──────┐    ┌────────┴───────┐    ┌───────┴──────┐
-   │   Alpaca    │    │    Alpaca      │    │  Anthropic   │
-   │ Trading API │    │   News API     │    │  Claude API  │
-   └─────────────┘    └────────────────┘    └──────────────┘
+│  └─────────────┘   └────────┬─────────┘   └──────┬───────┘  │
+└───────────────────────────── ┼──────────────────── ┼──────────┘
+                               │                     │
+                       ┌───────┴──────┐    ┌─────────┴────┐
+                       │    Yahoo     │    │  Anthropic   │
+                       │   Finance    │    │  Claude API  │
+                       └──────────────┘    └──────────────┘
 ```
 
 **Data flows:**
-1. On startup and every 5 minutes — backend fetches positions, pulls news for held symbols, caches articles, and broadcasts a snapshot over WebSocket
+1. On startup and every 5 minutes — backend reads positions, pulls news for held symbols, caches articles, and broadcasts a snapshot over WebSocket
 2. Browser connects via WebSocket — receives account, positions, and news on connect and on each refresh
 3. Clicking a holding — filters the news feed client-side with no additional request
 4. Clicking ANALYZE or sending a message — backend builds context from live positions and cached news, streams Claude's response back as SSE
@@ -144,15 +168,15 @@ VibeTrading/
 ├── run.sh                # Mac/Linux launcher
 ├── backend/
 │   ├── main.py           # FastAPI app — REST, WebSocket, SSE, news refresh loop
-│   ├── broker.py         # Alpaca read-only connector (positions, prices, bars)
-│   ├── news.py           # Alpaca news API wrapper with mock fallback
+│   ├── broker.py         # Portfolio reader (local/portfolio.json or mock fallback)
+│   ├── news.py           # Yahoo Finance news with mock fallback
 │   ├── claude_client.py  # Claude streaming integration for news analysis
 │   └── requirements.txt
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
 │   └── app.js
-└── assets/
+└── local/                # Gitignored — personal portfolio data goes here
 ```
 
 ---
@@ -162,11 +186,11 @@ VibeTrading/
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/account` | Account balance and daily P&L |
-| `GET` | `/api/positions` | Open positions |
+| `GET` | `/api/positions` | Current positions |
 | `GET` | `/api/news` | Cached news articles for current holdings |
 | `POST` | `/api/news/refresh` | Force a news refresh and broadcast |
 | `GET` | `/api/snapshot` | Account + positions + news in one call |
-| `GET` | `/api/status` | Broker mode, Claude availability, news status |
+| `GET` | `/api/status` | App status, Claude availability, news info |
 | `POST` | `/api/claude` | Stream Claude analysis (SSE) |
 | `WS` | `/ws` | Live snapshot updates every 5 minutes |
 
@@ -175,5 +199,5 @@ VibeTrading/
 ## Security
 
 - `.env` is gitignored — API keys stay local
-- Broker is read-only — no orders are placed
-- Paper trading is the default
+- `local/` is gitignored — personal portfolio data stays local
+- No brokerage connection — no orders can be placed
