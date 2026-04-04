@@ -99,20 +99,28 @@ To use your real holdings locally without affecting the shipped version, create 
 ```json
 {
   "account": {
-    "equity": 42242.65,
-    "cash": 150.75,
-    "buying_power": 150.75,
-    "daily_pnl": 139.55,
-    "daily_pnl_pct": 0.33
+    "equity": 50000.00,
+    "cash": 5000.00,
+    "buying_power": 5000.00,
+    "daily_pnl": 250.00,
+    "daily_pnl_pct": 0.50
   },
   "positions": [
     {
-      "symbol": "VTI",
+      "symbol": "AAPL",
       "qty": 10,
-      "avg_entry_price": 200.00,
-      "current_price": 215.00,
-      "unrealized_pl": 150.00,
-      "unrealized_plpc": 7.5
+      "avg_entry_price": 170.00,
+      "current_price": 182.00,
+      "unrealized_pl": 120.00,
+      "unrealized_plpc": 7.06
+    },
+    {
+      "symbol": "MSFT",
+      "qty": 5,
+      "avg_entry_price": 380.00,
+      "current_price": 395.00,
+      "unrealized_pl": 75.00,
+      "unrealized_plpc": 3.95
     }
   ]
 }
@@ -127,7 +135,7 @@ To use your real holdings locally without affecting the shipped version, create 
 │                       Browser                                │
 │                                                              │
 │  ┌──────────────┐   ┌───────────────────┐   ┌────────────┐  │
-│  │   Holdings   │◄─►│     News Feed     │   │   Claude   │  │
+│  │   Holdings   │◄─►│     News Feed     │   │     AI     │  │
 │  │  + Account   │   │ (filter by symbol)│   │  Analyst   │  │
 │  └──────────────┘   └───────────────────┘   └─────┬──────┘  │
 │         │                    ▲                     │ SSE     │
@@ -146,8 +154,9 @@ To use your real holdings locally without affecting the shipped version, create 
 └───────────────────────────── ┼──────────────────── ┼──────────┘
                                │                     │
                        ┌───────┴──────┐    ┌─────────┴────┐
-                       │    Yahoo     │    │  Anthropic   │
-                       │   Finance    │    │  Claude API  │
+                       │    Yahoo     │    │  AI Provider │
+                       │   Finance    │    │ Claude/GPT/  │
+                       │              │    │   Gemini     │
                        └──────────────┘    └──────────────┘
 ```
 
