@@ -99,45 +99,39 @@ You can also ask specific questions:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Browser (frontend)                      │
-│                                                                 │
-│  ┌─────────────┐    ┌──────────────────────┐    ┌───────────┐  │
-│  │   Holdings  │◄──►│      News Feed        │    │  Claude   │  │
-│  │   + Account │ ▲  │  (filter by holding) │    │  Analyst  │  │
-│  └─────────────┘ │  └──────────────────────┘    └─────┬─────┘  │
-│       click      │              ▲                      │ SSE    │
-│      filters     │              │ WebSocket snapshot   │ stream │
-└──────────────────┼──────────────┼──────────────────────┼────────┘
-                   │              │                      │
-┌──────────────────┼──────────────┼──────────────────────┼────────┐
-│                  │   FastAPI backend (port 8000)        │        │
-│                  │              │                      │        │
-│   ┌──────────────┴───┐  ┌───────┴──────┐   ┌──────────┴──────┐ │
-│   │   broker.py      │  │   main.py    │   │ claude_client.py│ │
-│   │  (read-only)     │  │              │   │  claude-opus-4-6│ │
-│   │                  │  │ background   │   │  adaptive think │ │
-│   │ • get_account()  │  │ refresh loop │   └────────┬────────┘ │
-│   │ • get_positions()│  │ every 5 min  │            │          │
-│   │ • get_bars()     │  └──────┬───────┘            │          │
-│   └──────┬───────────┘         │                    │          │
-│          │                ┌────┴─────┐               │          │
-│          │                │ news.py  │               │          │
-│          │                └────┬─────┘               │          │
-└──────────┼─────────────────────┼─────────────────────┼──────────┘
-           │                     │                     │
-    ┌──────┴──────┐       ┌──────┴──────┐     ┌───────┴──────┐
-    │  Alpaca     │       │  Alpaca     │     │  Anthropic   │
-    │ Trading API │       │  News API   │     │  Claude API  │
-    │ (positions) │       │ (articles)  │     │              │
-    └─────────────┘       └─────────────┘     └──────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                       Browser                                │
+│                                                              │
+│  ┌──────────────┐   ┌───────────────────┐   ┌────────────┐  │
+│  │   Holdings   │◄─►│     News Feed     │   │   Claude   │  │
+│  │  + Account   │   │ (filter by symbol)│   │  Analyst   │  │
+│  └──────────────┘   └───────────────────┘   └─────┬──────┘  │
+│         │                    ▲                     │ SSE     │
+│      click                   │ WebSocket           │ stream  │
+│      filters                 │ snapshot            │         │
+└─────────┼────────────────────┼─────────────────────┼─────────┘
+          │                    │                     │
+┌─────────┼────────────────────┼─────────────────────┼─────────┐
+│         │           Backend  │                     │         │
+│         │                    │                     │         │
+│  ┌──────┴──────┐   ┌─────────┴────────┐   ┌───────┴──────┐  │
+│  │   Broker    │   │   News Service   │   │  AI Service  │  │
+│  │ (read-only) │   │  refresh every   │   │              │  │
+│  │             │   │    5 minutes     │   │              │  │
+│  └──────┬──────┘   └────────┬─────────┘   └──────┬───────┘  │
+└─────────┼───────────────────┼──────────────────── ┼──────────┘
+          │                   │                     │
+   ┌──────┴──────┐    ┌────────┴───────┐    ┌───────┴──────┐
+   │   Alpaca    │    │    Alpaca      │    │  Anthropic   │
+   │ Trading API │    │   News API     │    │  Claude API  │
+   └─────────────┘    └────────────────┘    └──────────────┘
 ```
 
 **Data flows:**
-1. On startup and every 5 minutes — backend fetches positions from Alpaca, pulls news for those symbols, caches articles, broadcasts snapshot over WebSocket
+1. On startup and every 5 minutes — backend fetches positions, pulls news for held symbols, caches articles, and broadcasts a snapshot over WebSocket
 2. Browser connects via WebSocket — receives account, positions, and news on connect and on each refresh
-3. Clicking a holding — filters the news feed client-side (no extra request)
-4. Clicking ANALYZE or sending a message — POST to `/api/claude`; backend builds context from live positions + cached news and streams Claude's response back as SSE
+3. Clicking a holding — filters the news feed client-side with no additional request
+4. Clicking ANALYZE or sending a message — backend builds context from live positions and cached news, streams Claude's response back as SSE
 
 ---
 
