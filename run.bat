@@ -19,6 +19,12 @@ pause
 exit /b 1
 :found_python
 
+:: ── Free port 8000 if already in use ────────────────────────────
+for /f "tokens=5" %%p in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"') do (
+    echo Stopping old server (PID %%p)...
+    taskkill /PID %%p /F >nul 2>&1
+)
+
 :: ── Create venv if missing ─────────────────────────────────────
 if not exist "venv\Scripts\activate.bat" (
     echo Creating virtual environment...
@@ -35,7 +41,7 @@ call venv\Scripts\activate.bat
 
 :: ── Install dependencies ────────────────────────────────────────
 echo Installing dependencies...
-pip install -r requirements.txt
+pip install -r requirements.txt -q
 if errorlevel 1 (
     echo ERROR: Dependency installation failed.
     pause
@@ -47,7 +53,7 @@ start "" /b cmd /c "timeout /t 2 >nul && start http://localhost:8000/app"
 
 :: ── Start server ───────────────────────────────────────────────
 echo.
-echo  VibeTrading running at http://localhost:8000/app
+echo  VibeTradingNews running at http://localhost:8000/app
 echo  Press Ctrl+C to stop.
 echo.
 uvicorn main:app --reload --port 8000
