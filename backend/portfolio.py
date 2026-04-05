@@ -274,29 +274,34 @@ class PortfolioReader:
         """
         local = self._local_portfolio()
         if local and "positions" in local and YFINANCE_AVAILABLE:
-            positions = local["positions"]
+            all_positions = local["positions"]
+            a = local.get("account", {})
+
             if symbol_filter is not None:
-                allowed = set(symbol_filter)
-                positions = [p for p in positions if p["symbol"] in allowed]
+                # Filtered view: include only the requested symbols (no offset)
+                positions = [p for p in all_positions if p["symbol"] in set(symbol_filter)]
+                non_pos = 0.0
+            else:
+                # Full view: exclude positions flagged as chart_excluded (e.g. 401k proxies
+                # whose share counts were back-calculated and don't track accurately).
+                # Their total value is captured in non_position_equity instead.
+                positions = [p for p in all_positions if not p.get("chart_excluded")]
+                non_pos = float(a.get("non_position_equity", 0))
+
             candles = self._live_pnl_history(positions, period, start, end)
-            # When showing all positions, scale so the chart's right edge matches
-            # the stored equity minus cash (handles 401k proxy ETF price drift).
-            if candles and symbol_filter is None:
-                a = local.get("account", {})
-                target = a.get("equity", 0) - a.get("cash", 0)
-                last_close = candles[-1]["close"]
-                if last_close > 0 and target > 0:
-                    scale = target / last_close
-                    candles = [
-                        {
-                            "time":  c["time"],
-                            "open":  round(c["open"]  * scale, 2),
-                            "high":  round(c["high"]  * scale, 2),
-                            "low":   round(c["low"]   * scale, 2),
-                            "close": round(c["close"] * scale, 2),
-                        }
-                        for c in candles
-                    ]
+            if candles and non_pos > 0:
+                # Add the static non-position equity (e.g. 401k total) as a flat offset
+                # so the chart Y-axis reflects true portfolio value.
+                candles = [
+                    {
+                        "time":  c["time"],
+                        "open":  round(c["open"]  + non_pos, 2),
+                        "high":  round(c["high"]  + non_pos, 2),
+                        "low":   round(c["low"]   + non_pos, 2),
+                        "close": round(c["close"] + non_pos, 2),
+                    }
+                    for c in candles
+                ]
             return candles
 
         # Demo mode: use real yfinance history for demo symbols
