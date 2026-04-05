@@ -7,13 +7,14 @@ import asyncio
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from dotenv import dotenv_values, load_dotenv
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -163,6 +164,17 @@ class _SecurityHeaders(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; "
+            "connect-src 'self'; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none';"
+        )
         return response
 
 
@@ -222,11 +234,19 @@ async def health():
     return {"status": "ok", "mode": portfolio.mode}
 
 
+_KEY_LINE_RE = re.compile(
+    r"^(ANTHROPIC_API_KEY|OPENAI_API_KEY|GOOGLE_API_KEY|GEMINI_API_KEY)\s*=\s*.+$",
+    re.MULTILINE,
+)
+
+
 @app.get("/api/settings")
 async def get_settings():
     try:
         from setup_portfolio import get_raw_config
-        return {"content": get_raw_config()}
+        content = get_raw_config()
+        content = _KEY_LINE_RE.sub(lambda m: m.group(0).split("=")[0] + "= [hidden]", content)
+        return {"content": content}
     except Exception as e:
         logger.error(f"Failed to read settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to read settings")
@@ -242,7 +262,7 @@ async def save_settings(request: Request, body: SettingsRequest):
         result = await loop.run_in_executor(None, lambda: save_and_rebuild(body.content))
     except Exception as e:
         logger.error(f"Settings save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Configuration update failed")
 
     portfolio.reset_cache()
 
@@ -300,12 +320,34 @@ async def refresh_news(request: Request):
 
 
 @app.get("/api/pnl-history")
-async def get_pnl_history(period: str = "1M", start: str = None, end: str = None, symbols: str = None):
+@limiter.limit("30/minute")
+async def get_pnl_history(
+    request: Request,
+    period: str = "1M",
+    start: str = Query(None, max_length=10),
+    end: str = Query(None, max_length=10),
+    symbols: str = Query(None, max_length=150),
+):
     if period not in ("1D", "5D", "1M", "3M", "6M", "1Y", "CUSTOM"):
-        raise HTTPException(status_code=400, detail=f"Invalid period '{period}'")
+        raise HTTPException(status_code=400, detail="Invalid period")
     if period == "CUSTOM" and not (start and end):
         raise HTTPException(status_code=400, detail="CUSTOM period requires start and end dates")
-    symbol_filter = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None
+    if start:
+        try:
+            datetime.strptime(start, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start date (YYYY-MM-DD)")
+    if end:
+        try:
+            datetime.strptime(end, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end date (YYYY-MM-DD)")
+    symbol_filter = None
+    if symbols:
+        syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        if any(not re.match(r"^[A-Z0-9.]{1,6}$", s) for s in syms):
+            raise HTTPException(status_code=400, detail="Invalid symbol")
+        symbol_filter = syms[:20]
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
@@ -325,27 +367,12 @@ async def get_snapshot():
         raise HTTPException(status_code=500, detail="Failed to build snapshot")
 
 
-def _env_keys_configured() -> list[str]:
-    """Read .env file directly and return which AI providers have keys set."""
-    env_path = Path(__file__).parent.parent / "local" / ".env"
-    vals = dotenv_values(env_path) if env_path.exists() else {}
-    found = []
-    if vals.get("ANTHROPIC_API_KEY", "").strip():
-        found.append("anthropic")
-    if vals.get("OPENAI_API_KEY", "").strip():
-        found.append("openai")
-    if vals.get("GOOGLE_API_KEY", "").strip() or vals.get("GEMINI_API_KEY", "").strip():
-        found.append("google")
-    return found
-
-
 @app.get("/api/status")
 async def get_status():
     return {
         "portfolio_mode": portfolio.mode,
         "ai_available": ai_client.available,
         "ai_provider": ai_client.provider,
-        "ai_keys_in_env": _env_keys_configured(),
         "news_demo": news_aggregator.demo,
         "news_article_count": len(news_cache.get("articles", [])),
         "news_last_updated": news_cache.get("last_updated"),
