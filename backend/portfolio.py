@@ -10,6 +10,7 @@ import json
 import logging
 import random
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -147,3 +148,83 @@ class PortfolioReader:
             self._position_dict(sym, float(qty), entry, current + random.uniform(-1, 1))
             for sym, qty, entry, current in mock
         ]
+
+    # ------------------------------------------------------------------ #
+    # P&L history (candlestick chart)                                      #
+    # ------------------------------------------------------------------ #
+
+    def get_pnl_history(self, days: int = 30) -> list[dict]:
+        """
+        Returns daily portfolio P&L OHLC for the past `days` trading days.
+        Each entry: {time, open, high, low, close} where values are unrealized $ P&L.
+        Requires yfinance for live data; falls back to deterministic mock data in demo mode.
+        """
+        local = self._local_portfolio()
+        if local and "positions" in local and YFINANCE_AVAILABLE:
+            return self._live_pnl_history(local["positions"], days)
+        return self._demo_pnl_history(days)
+
+    def _live_pnl_history(self, positions: list[dict], days: int) -> list[dict]:
+        import yfinance as yf
+
+        end   = datetime.now()
+        start = end - timedelta(days=days + 14)  # buffer for weekends/holidays
+        candles: dict[str, dict[str, float]] = {}
+
+        for p in positions:
+            sym   = p["symbol"]
+            qty   = float(p["qty"])
+            entry = float(p["avg_entry_price"])
+            try:
+                hist = yf.Ticker(sym).history(start=start, end=end, interval="1d")
+                for ts, row in hist.iterrows():
+                    date = ts.strftime("%Y-%m-%d")
+                    if date not in candles:
+                        candles[date] = {"open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0}
+                    candles[date]["open"]  += (row["Open"]  - entry) * qty
+                    candles[date]["high"]  += (row["High"]  - entry) * qty
+                    candles[date]["low"]   += (row["Low"]   - entry) * qty
+                    candles[date]["close"] += (row["Close"] - entry) * qty
+            except Exception as e:
+                logger.warning(f"P&L history fetch failed for {sym}: {e}")
+
+        result = sorted(
+            [{"time": d, "open": round(v["open"], 2), "high": round(v["high"], 2),
+              "low": round(v["low"], 2), "close": round(v["close"], 2)}
+             for d, v in candles.items()],
+            key=lambda x: x["time"],
+        )
+        return result[-days:]
+
+    def _demo_pnl_history(self, days: int) -> list[dict]:
+        """Deterministic mock P&L history for demo mode."""
+        rng = random.Random(42)
+        today = datetime.now().date()
+
+        # Collect the last `days` Mon–Fri dates in chronological order
+        trading_days: list = []
+        d = today
+        while len(trading_days) < days:
+            if d.weekday() < 5:
+                trading_days.append(d)
+            d -= timedelta(days=1)
+        trading_days.reverse()
+
+        result = []
+        pnl = 0.0
+        for d in trading_days:
+            change = rng.gauss(15, 180)
+            open_  = pnl
+            close  = pnl + change
+            high   = max(open_, close) + abs(rng.gauss(0, 70))
+            low    = min(open_, close) - abs(rng.gauss(0, 70))
+            result.append({
+                "time":  d.strftime("%Y-%m-%d"),
+                "open":  round(open_, 2),
+                "high":  round(high, 2),
+                "low":   round(low, 2),
+                "close": round(close, 2),
+            })
+            pnl = close
+
+        return result

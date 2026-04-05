@@ -21,10 +21,13 @@ let streaming   = false;
 let retryTimer  = null;
 let activeFilter = 'ALL';
 let allArticles  = [];
+let pnlChart     = null;
+let pnlSeries    = null;
 
 // ─── Init ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initResizeHandles();
+  initPnlChart();
   connectWS();
   checkClaudeStatus();
 });
@@ -75,6 +78,67 @@ function initResizeHandles() {
       document.addEventListener('mouseup',   onUp);
     });
   });
+}
+
+// ─── P&L candlestick chart ───────────────────────────────────
+function initPnlChart() {
+  const container = document.getElementById('pnlChart');
+
+  pnlChart = LightweightCharts.createChart(container, {
+    height: 160,
+    layout: {
+      background: { color: '#0a0a0a' },
+      textColor:  '#444444',
+      fontFamily: "'JetBrains Mono', 'Fira Mono', monospace",
+      fontSize:   10,
+    },
+    grid: {
+      vertLines: { color: '#181818' },
+      horzLines: { color: '#181818' },
+    },
+    timeScale: {
+      borderColor:     '#252525',
+      fixLeftEdge:     true,
+      fixRightEdge:    true,
+    },
+    rightPriceScale: {
+      borderColor: '#252525',
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+    },
+    handleScroll:  false,
+    handleScale:   false,
+  });
+
+  pnlSeries = pnlChart.addCandlestickSeries({
+    upColor:        '#00d97e',
+    downColor:      '#ff4757',
+    borderUpColor:   '#00d97e',
+    borderDownColor: '#ff4757',
+    wickUpColor:    '#00d97e',
+    wickDownColor:  '#ff4757',
+  });
+
+  // Keep chart width in sync with its container as panels resize
+  new ResizeObserver(() => {
+    if (container.clientWidth > 0) pnlChart.resize(container.clientWidth, 160);
+  }).observe(container);
+
+  loadPnlHistory();
+}
+
+async function loadPnlHistory() {
+  try {
+    const res  = await fetch(`${API}/api/pnl-history`);
+    const data = await res.json();
+    if (Array.isArray(data) && data.length) {
+      pnlSeries.setData(data);
+      pnlChart.timeScale().fitContent();
+    }
+  } catch (e) {
+    console.error('P&L history load failed:', e);
+  }
 }
 
 // ─── WebSocket ───────────────────────────────────────────────

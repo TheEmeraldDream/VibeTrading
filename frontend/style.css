@@ -293,6 +293,30 @@ main.grid {
   margin-top: 4px;
 }
 
+/* ─── P&L chart ─────────────────────────────────────────────── */
+.chart-section {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.chart-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 6px;
+}
+
+.chart-range {
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.chart-container {
+  height: 160px;
+  position: relative;
+}
+
 /* ─── News panel ────────────────────────────────────────────── */
 .panel#panelCenter {
   padding: 0;

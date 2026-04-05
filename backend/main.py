@@ -255,6 +255,16 @@ async def refresh_news(request: Request):
     }
 
 
+@app.get("/api/pnl-history")
+async def get_pnl_history():
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, portfolio.get_pnl_history)
+    except Exception as e:
+        logger.error(f"Failed to build P&L history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to build P&L history")
+
+
 @app.get("/api/snapshot")
 async def get_snapshot():
     try:
