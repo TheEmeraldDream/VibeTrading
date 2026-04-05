@@ -99,15 +99,10 @@ class PortfolioReader:
         local = self._local_portfolio()
         if local and "account" in local:
             a = local["account"]
-            cash = a.get("cash", 0)
-            # Compute equity from live position prices so it matches the chart
-            positions = self.get_positions()
-            market_value = sum(p["market_value"] for p in positions)
-            equity = round(market_value + cash, 2)
             return {
-                "equity":        equity,
-                "cash":          cash,
-                "buying_power":  a.get("buying_power", cash),
+                "equity":        a.get("equity", 0),
+                "cash":          a.get("cash", 0),
+                "buying_power":  a.get("buying_power", 0),
                 "daily_pnl":     a.get("daily_pnl", 0),
                 "daily_pnl_pct": a.get("daily_pnl_pct", 0),
                 "mode":          self.mode,
@@ -216,7 +211,26 @@ class PortfolioReader:
             if symbol_filter is not None:
                 allowed = set(symbol_filter)
                 positions = [p for p in positions if p["symbol"] in allowed]
-            return self._live_pnl_history(positions, period, start, end)
+            candles = self._live_pnl_history(positions, period, start, end)
+            # When showing all positions, scale so the chart's right edge matches
+            # the stored equity minus cash (handles 401k proxy ETF price drift).
+            if candles and symbol_filter is None:
+                a = local.get("account", {})
+                target = a.get("equity", 0) - a.get("cash", 0)
+                last_close = candles[-1]["close"]
+                if last_close > 0 and target > 0:
+                    scale = target / last_close
+                    candles = [
+                        {
+                            "time":  c["time"],
+                            "open":  round(c["open"]  * scale, 2),
+                            "high":  round(c["high"]  * scale, 2),
+                            "low":   round(c["low"]   * scale, 2),
+                            "close": round(c["close"] * scale, 2),
+                        }
+                        for c in candles
+                    ]
+            return candles
         return self._demo_pnl_history(period, start, end)
 
     def _live_pnl_history(
