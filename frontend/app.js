@@ -167,6 +167,8 @@ async function loadPnlHistory(customStart, customEnd) {
     const res  = await fetch(url);
     const data = await res.json();
     if (Array.isArray(data) && data.length) {
+      const intraday = activePeriod === '1D' || activePeriod === '5D';
+      pnlChart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
       pnlSeries.setData(data);
       pnlChart.timeScale().fitContent();
     }
