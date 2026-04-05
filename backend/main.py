@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values, load_dotenv
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -75,6 +75,7 @@ class ConnectionManager:
             except Exception:
                 dead.append(ws)
         for ws in dead:
+            logger.debug(f"Dropping dead WebSocket connection ({len(dead)} total)")
             self.disconnect(ws)
 
 
@@ -85,20 +86,25 @@ ws_manager = ConnectionManager()
 # Background news refresh                                              #
 # ------------------------------------------------------------------ #
 
+async def _do_refresh() -> None:
+    """Fetch live prices and news articles, updating news_cache in place."""
+    loop = asyncio.get_running_loop()
+    positions = portfolio.get_positions()
+    symbols = [p["symbol"] for p in positions]
+    if symbols:
+        await loop.run_in_executor(None, portfolio.fetch_live_prices, symbols)
+    news_cache["articles"] = await loop.run_in_executor(
+        None, news_aggregator.get_news, symbols
+    )
+    news_cache["last_updated"] = datetime.now(timezone.utc).isoformat()
+    logger.info(f"News refreshed — {len(news_cache['articles'])} articles for {symbols}")
+
+
 async def _news_refresh() -> None:
-    """Fetch live prices + news every 5 minutes and broadcast to all clients."""
+    """Background loop: refresh prices + news every 5 minutes and broadcast to all clients."""
     while True:
-        loop = asyncio.get_running_loop()
         try:
-            positions = portfolio.get_positions()
-            symbols = [p["symbol"] for p in positions]
-            if symbols:
-                await loop.run_in_executor(None, portfolio.fetch_live_prices, symbols)
-            news_cache["articles"] = await loop.run_in_executor(
-                None, news_aggregator.get_news, symbols
-            )
-            news_cache["last_updated"] = datetime.now(timezone.utc).isoformat()
-            logger.info(f"News refreshed — {len(news_cache['articles'])} articles for {symbols}")
+            await _do_refresh()
         except Exception as e:
             logger.error(f"News refresh error: {e}")
 
@@ -207,12 +213,20 @@ async def root():
 
 @app.get("/api/account")
 async def get_account():
-    return portfolio.get_account()
+    try:
+        return portfolio.get_account()
+    except Exception as e:
+        logger.error(f"Failed to read account: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read account data")
 
 
 @app.get("/api/positions")
 async def get_positions():
-    return portfolio.get_positions()
+    try:
+        return portfolio.get_positions()
+    except Exception as e:
+        logger.error(f"Failed to read positions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read positions")
 
 
 @app.get("/api/news")
@@ -226,16 +240,15 @@ async def get_news():
 @app.post("/api/news/refresh")
 @limiter.limit("5/minute")
 async def refresh_news(request: Request):
-    loop = asyncio.get_running_loop()
-    positions = portfolio.get_positions()
-    symbols = [p["symbol"] for p in positions]
-    if symbols:
-        await loop.run_in_executor(None, portfolio.fetch_live_prices, symbols)
-    news_cache["articles"] = await loop.run_in_executor(
-        None, news_aggregator.get_news, symbols
-    )
-    news_cache["last_updated"] = datetime.now(timezone.utc).isoformat()
-    await ws_manager.broadcast(_build_snapshot())
+    try:
+        await _do_refresh()
+    except Exception as e:
+        logger.error(f"Manual news refresh failed: {e}")
+        raise HTTPException(status_code=503, detail="News refresh failed — check server logs")
+    try:
+        await ws_manager.broadcast(_build_snapshot())
+    except Exception as e:
+        logger.warning(f"Broadcast after manual refresh failed: {e}")
     return {
         "articles": news_cache["articles"],
         "last_updated": news_cache["last_updated"],
@@ -244,7 +257,11 @@ async def refresh_news(request: Request):
 
 @app.get("/api/snapshot")
 async def get_snapshot():
-    return _build_snapshot()
+    try:
+        return _build_snapshot()
+    except Exception as e:
+        logger.error(f"Failed to build snapshot: {e}")
+        raise HTTPException(status_code=500, detail="Failed to build snapshot")
 
 
 def _env_keys_configured() -> list[str]:
@@ -287,11 +304,15 @@ async def claude_prompt(request: Request, body: PromptRequest):
       data: {"type": "chunk", "text": "..."}
       data: {"type": "done"}
     """
-    context = ai_client.build_context(
-        account=portfolio.get_account(),
-        positions=portfolio.get_positions(),
-        news=news_cache.get("articles", []),
-    )
+    try:
+        context = ai_client.build_context(
+            account=portfolio.get_account(),
+            positions=portfolio.get_positions(),
+            news=news_cache.get("articles", []),
+        )
+    except Exception as e:
+        logger.error(f"Failed to build analysis context: {e}")
+        raise HTTPException(status_code=500, detail="Failed to build analysis context")
 
     async def generate():
         try:
@@ -324,10 +345,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         await websocket.send_json(_build_snapshot())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to send initial snapshot: {e}")
 
     try:
+        # Keep the connection open; the client doesn't send messages,
+        # but receive_text() lets us detect when it disconnects.
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

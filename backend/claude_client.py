@@ -76,8 +76,10 @@ class AIClient:
             self._search_enabled = False
 
         preferred = os.getenv("AI_PROVIDER", "").lower()
-        order = ([preferred] if preferred in _PROVIDER_PRIORITY else []) + \
-                [p for p in _PROVIDER_PRIORITY if p != preferred]
+        if preferred in _PROVIDER_PRIORITY:
+            order = [preferred] + [p for p in _PROVIDER_PRIORITY if p != preferred]
+        else:
+            order = _PROVIDER_PRIORITY
 
         for provider in order:
             if self._init_provider(provider):
@@ -214,6 +216,9 @@ RECENT NEWS (last 48 hours, newest first):
         return await loop.run_in_executor(None, _ddg_search, query)
 
     async def _stream_anthropic(self, message: str) -> AsyncGenerator[str, None]:
+        # Anthropic tool use requires a multi-turn loop: stream text → check if
+        # the model called a tool → execute the tool → feed results back → repeat.
+        # max_iterations caps runaway loops if the model keeps requesting searches.
         messages = [{"role": "user", "content": message}]
         tools = [_WEB_SEARCH_TOOL] if self._search_enabled else []
         max_iterations = 5
@@ -238,6 +243,7 @@ RECENT NEWS (last 48 hours, newest first):
                 if final.stop_reason != "tool_use":
                     break
 
+                # Execute each requested search and collect results
                 tool_results = []
                 for block in final.content:
                     if block.type == "tool_use" and block.name == "web_search":

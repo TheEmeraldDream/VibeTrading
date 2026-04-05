@@ -241,15 +241,21 @@ async function refreshNews() {
   btn.textContent = 'REFRESHING…';
   try {
     const res  = await fetch(`${API}/api/news/refresh`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error ${res.status}`);
+    }
     const data = await res.json();
     allArticles = data.articles || [];
     renderNews();
     if (data.last_updated) renderNewsTimestamp(data.last_updated);
   } catch (e) {
     console.error('Refresh failed:', e);
+    btn.textContent = 'REFRESH FAILED';
+    setTimeout(() => { btn.textContent = 'REFRESH NEWS'; }, 3000);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'REFRESH NEWS';
+    if (btn.textContent === 'REFRESHING…') btn.textContent = 'REFRESH NEWS';
   }
 }
 
@@ -293,6 +299,37 @@ function handleKey(e) {
   }
 }
 
+// Read a Server-Sent Events stream and call onChunk(text) for each chunk.
+// Returns the full accumulated text.
+async function readSSEStream(response, onChunk) {
+  const reader  = response.body.getReader();
+  const decoder = new TextDecoder();
+  let   buf     = '';
+  let   accumulated = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    // SSE lines end with \n; split on that and keep any incomplete line in buf
+    // so we never try to parse a partial "data: ..." payload.
+    const lines = buf.split('\n');
+    buf = lines.pop();
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const evt = JSON.parse(line.slice(6));
+      if (evt.type === 'chunk') {
+        accumulated += evt.text;
+        onChunk(accumulated);
+      }
+      if (evt.type === 'done') return accumulated;
+    }
+  }
+  return accumulated;
+}
+
 async function sendPrompt() {
   if (streaming) return;
   const input = document.getElementById('promptInput');
@@ -319,27 +356,7 @@ async function sendPrompt() {
       body: JSON.stringify({ prompt }),
     });
 
-    const reader  = res.body.getReader();
-    const decoder = new TextDecoder();
-    let   buf     = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const evt = JSON.parse(line.slice(6));
-        if (evt.type === 'chunk') {
-          accumulated += evt.text;
-          updateClaudeMsg(textEl, accumulated);
-        }
-        if (evt.type === 'done') break;
-      }
-    }
+    accumulated = await readSSEStream(res, text => updateClaudeMsg(textEl, text));
   } catch (e) {
     updateClaudeMsg(textEl, accumulated + `\n\n[Connection error: ${e.message}]`);
   } finally {
@@ -347,10 +364,8 @@ async function sendPrompt() {
     document.getElementById('sendBtn').disabled = false;
     document.getElementById('analyzeBtn').disabled = false;
     document.getElementById('claudeBadge').className = 'claude-badge online';
-    // Remove cursor
     const cursor = textEl.querySelector('.cursor');
     if (cursor) cursor.remove();
-    // Scroll to bottom
     const msgs = document.getElementById('chatMessages');
     msgs.scrollTop = msgs.scrollHeight;
   }

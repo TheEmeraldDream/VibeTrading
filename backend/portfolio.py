@@ -30,8 +30,8 @@ class PortfolioReader:
         self._portfolio_cache_time: float = 0
         self._price_cache: dict[str, float] = {}
         self._price_cache_time: float = 0
-        _path = Path(__file__).parent.parent / "local" / "portfolio.json"
-        self.mode = "local" if _path.exists() else "demo"
+        self._portfolio_path = Path(__file__).parent.parent / "local" / "portfolio.json"
+        self.mode = "local" if self._portfolio_path.exists() else "demo"
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                      #
@@ -41,7 +41,7 @@ class PortfolioReader:
         now = time.monotonic()
         if self._portfolio_cache is not None and now - self._portfolio_cache_time < _PORTFOLIO_TTL:
             return self._portfolio_cache
-        path = Path(__file__).parent.parent / "local" / "portfolio.json"
+        path = self._portfolio_path
         if path.exists():
             try:
                 with open(path) as f:
@@ -108,6 +108,20 @@ class PortfolioReader:
             "status":        "ACTIVE",
         }
 
+    def _position_dict(self, symbol: str, qty: float, entry: float, price: float) -> dict:
+        pl   = (price - entry) * qty
+        plpc = (price - entry) / entry * 100
+        return {
+            "symbol":          symbol,
+            "qty":             qty,
+            "side":            "long",
+            "avg_entry_price": entry,
+            "current_price":   round(price, 2),
+            "market_value":    round(price * qty, 2),
+            "unrealized_pl":   round(pl, 2),
+            "unrealized_plpc": round(plpc, 2),
+        }
+
     # ------------------------------------------------------------------ #
     # Positions                                                            #
     # ------------------------------------------------------------------ #
@@ -119,39 +133,17 @@ class PortfolioReader:
             for p in local["positions"]:
                 qty   = float(p["qty"])
                 entry = float(p["avg_entry_price"])
-                # Use live price if cached, otherwise fall back to file value
+                # Use live price if cached, otherwise fall back to the file value
                 price = self._price_cache.get(p["symbol"], float(p.get("current_price", entry)))
-                pl    = (price - entry) * qty
-                plpc  = (price - entry) / entry * 100
-                result.append({
-                    "symbol":          p["symbol"],
-                    "qty":             qty,
-                    "side":            "long",
-                    "avg_entry_price": entry,
-                    "current_price":   round(price, 2),
-                    "market_value":    round(price * qty, 2),
-                    "unrealized_pl":   round(pl, 2),
-                    "unrealized_plpc": round(plpc, 2),
-                })
+                result.append(self._position_dict(p["symbol"], qty, entry, price))
             return result
+
         mock = [
             ("AAPL", 15, 178.50, 184.20),
             ("NVDA", 5,  620.00, 645.80),
             ("MSFT", 8,  390.10, 385.50),
         ]
-        result = []
-        for sym, qty, entry, current in mock:
-            current += random.uniform(-1, 1)
-            pl  = (current - entry) * qty
-            plpc = (current - entry) / entry * 100
-            result.append({
-                "symbol":          sym,
-                "qty":             float(qty),
-                "side":            "long",
-                "avg_entry_price": entry,
-                "current_price":   round(current, 2),
-                "market_value":    round(current * qty, 2),
-                "unrealized_pl":   round(pl, 2),
-                "unrealized_plpc": round(plpc, 2),
-            })
-        return result
+        return [
+            self._position_dict(sym, float(qty), entry, current + random.uniform(-1, 1))
+            for sym, qty, entry, current in mock
+        ]
