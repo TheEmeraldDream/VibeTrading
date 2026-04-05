@@ -55,14 +55,15 @@ class PortfolioReader:
         self._portfolio_cache = None
         return None
 
-    def fetch_live_prices(self, symbols: list[str]) -> dict[str, float]:
+    def fetch_live_prices(self, symbols: list[str], force: bool = False) -> dict[str, float]:
         """
         Fetch current prices from yfinance for all symbols.
         Blocking — call via asyncio.get_running_loop().run_in_executor().
-        Results are cached for _PRICE_TTL seconds.
+        Results are cached for _PRICE_TTL seconds; pass force=True to bypass the cache
+        (used on every news refresh so prices are always current).
         """
         now = time.monotonic()
-        if self._price_cache and now - self._price_cache_time < _PRICE_TTL:
+        if not force and self._price_cache and now - self._price_cache_time < _PRICE_TTL:
             return self._price_cache
         if not YFINANCE_AVAILABLE or not symbols:
             return self._price_cache

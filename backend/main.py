@@ -92,7 +92,7 @@ async def _do_refresh() -> None:
     positions = portfolio.get_positions()
     symbols = [p["symbol"] for p in positions]
     if symbols:
-        await loop.run_in_executor(None, portfolio.fetch_live_prices, symbols)
+        await loop.run_in_executor(None, lambda: portfolio.fetch_live_prices(symbols, force=True))
     news_cache["articles"] = await loop.run_in_executor(
         None, news_aggregator.get_news, symbols
     )
