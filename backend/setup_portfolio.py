@@ -14,9 +14,9 @@ import sys
 from pathlib import Path
 
 ROOT      = Path(__file__).parent.parent
-SETUP_TXT = ROOT / "setup.txt"
-ENV_PATH  = ROOT / ".env"
 LOCAL_DIR = ROOT / "local"
+SETUP_TXT = LOCAL_DIR / "setup.txt"
+ENV_PATH  = LOCAL_DIR / ".env"
 JSON_PATH = LOCAL_DIR / "portfolio.json"
 
 SETUP_TEMPLATE = """\

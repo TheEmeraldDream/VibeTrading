@@ -23,7 +23,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent / "local" / ".env")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -327,7 +327,7 @@ async def get_snapshot():
 
 def _env_keys_configured() -> list[str]:
     """Read .env file directly and return which AI providers have keys set."""
-    env_path = Path(__file__).parent.parent / ".env"
+    env_path = Path(__file__).parent.parent / "local" / ".env"
     vals = dotenv_values(env_path) if env_path.exists() else {}
     found = []
     if vals.get("ANTHROPIC_API_KEY", "").strip():

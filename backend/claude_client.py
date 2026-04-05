@@ -261,7 +261,13 @@ RECENT NEWS (last 48 hours, newest first):
 
             except Exception as e:
                 logger.error(f"Anthropic stream error: {e}")
-                yield f"\n\n[Error: {e}]"
+                msg = str(e)
+                if "429" in msg or "rate_limit" in msg.lower() or "overloaded" in msg.lower():
+                    yield "\n\n[Claude is rate limited or overloaded. Wait a moment and try again.]"
+                elif "401" in msg or "authentication" in msg.lower() or "invalid x-api-key" in msg.lower():
+                    yield "\n\n[Claude authentication failed. Check that your ANTHROPIC_API_KEY is valid.]"
+                else:
+                    yield f"\n\n[Claude error: {e}]"
                 break
 
     async def _stream_openai(self, message: str) -> AsyncGenerator[str, None]:
@@ -281,21 +287,34 @@ RECENT NEWS (last 48 hours, newest first):
                     yield text
         except Exception as e:
             logger.error(f"OpenAI stream error: {e}")
-            yield f"\n\n[Error: {e}]"
+            msg = str(e)
+            if "429" in msg or "rate_limit" in msg.lower():
+                yield "\n\n[ChatGPT rate limit exceeded. Wait a moment and try again, or check your OpenAI usage limits.]"
+            elif "401" in msg or "authentication" in msg.lower() or "invalid api key" in msg.lower():
+                yield "\n\n[ChatGPT authentication failed. Check that your OPENAI_API_KEY is valid.]"
+            else:
+                yield f"\n\n[ChatGPT error: {e}]"
 
     async def _stream_google(self, message: str) -> AsyncGenerator[str, None]:
         try:
             from google.genai import types
-            async for chunk in self._client.aio.models.generate_content_stream(
+            stream = await self._client.aio.models.generate_content_stream(
                 model="gemini-2.0-flash",
                 contents=message,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     max_output_tokens=4096,
                 ),
-            ):
+            )
+            async for chunk in stream:
                 if chunk.text:
                     yield chunk.text
         except Exception as e:
             logger.error(f"Gemini stream error: {e}")
-            yield f"\n\n[Error: {e}]"
+            msg = str(e)
+            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                yield "\n\n[Gemini quota exceeded. You've hit the free tier limit — wait a minute and try again, or upgrade your Google AI plan.]"
+            elif "401" in msg or "API_KEY" in msg or "UNAUTHENTICATED" in msg:
+                yield "\n\n[Gemini authentication failed. Check that your GOOGLE_API_KEY is valid.]"
+            else:
+                yield f"\n\n[Gemini error: {e}]"
