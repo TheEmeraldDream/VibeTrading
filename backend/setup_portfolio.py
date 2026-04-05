@@ -264,9 +264,11 @@ def main() -> None:
         print("  No holdings found in setup.txt — running in demo mode.")
         return
 
-    # Skip rebuild if setup.txt hasn't changed since last build
-    if JSON_PATH.exists() and JSON_PATH.stat().st_mtime >= SETUP_TXT.stat().st_mtime:
-        print("  Holdings unchanged — skipping rebuild.")
+    # If portfolio.json already exists, don't overwrite it — it's the source of truth.
+    # Users update their portfolio via the Settings modal in the UI (which calls
+    # save_and_rebuild directly). Rebuilding on startup would clobber live data.
+    if JSON_PATH.exists():
+        print("  portfolio.json already exists — skipping rebuild.")
         return
 
     n_stocks   = sum(1 for h in holdings if h["symbol"] != "CASH")
